@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import LoginGate from "@/components/LoginGate";
+import AgentContextForm from "@/components/AgentContextForm";
 import CsvUploader from "@/components/CsvUploader";
 import LLMConfigurator from "@/components/LLMConfigurator";
 import ProgressBar from "@/components/ProgressBar";
@@ -14,6 +15,7 @@ import {
   EvaluationResult,
   LLMConfig,
   QuestionConsistency,
+  AgentReportContext,
 } from "@/lib/types";
 import {
   generateSingleEvaluatorPdf,
@@ -22,7 +24,15 @@ import {
 import { computeConsistency } from "@/lib/consistency";
 import { downloadTexFile } from "@/lib/texGenerator";
 
-type AppState = "login" | "upload" | "configure" | "evaluating" | "results";
+type AppState =
+  | "login"
+  | "context"
+  | "upload"
+  | "configure"
+  | "evaluating"
+  | "results";
+
+const REPORT_CONTEXT_STORAGE_KEY = "agentReportContext";
 
 type ScoreField = "accuracy" | "completeness" | "relevance" | "coherence" | "clarity" | "usefulness" | "overallScore";
 
@@ -112,6 +122,9 @@ function buildPanoramaSummary(
 export default function Home() {
   const [state, setState] = useState<AppState>("login");
   const [accessKey, setAccessKey] = useState("");
+  const [reportContext, setReportContext] = useState<AgentReportContext | null>(
+    null
+  );
   const [rows, setRows] = useState<EvaluationRow[]>([]);
 
   const [llmConfigs, setLlmConfigs] = useState<LLMConfig[]>([]);
@@ -133,10 +146,11 @@ export default function Home() {
   const [metaAnalyzing, setMetaAnalyzing] = useState(false);
 
   const [error, setError] = useState("");
-  const [evaluationDate, setEvaluationDate] = useState<Date>(new Date());
   const [pdfGenerating, setPdfGenerating] = useState(false);
 
   const chartRefsMap = useRef<Record<string, ScoreChartsHandle | null>>({});
+  const overviewPanelRef = useRef<HTMLDivElement | null>(null);
+  const metaPanelRef = useRef<HTMLDivElement | null>(null);
   const allResultsRef = useRef(allResults);
   allResultsRef.current = allResults;
   const completedLlmsRef = useRef(completedLlms);
@@ -144,14 +158,26 @@ export default function Home() {
 
   useEffect(() => {
     const saved = sessionStorage.getItem("accessKey");
+    const savedContext = sessionStorage.getItem(REPORT_CONTEXT_STORAGE_KEY);
     if (saved) {
       setAccessKey(saved);
-      setState("upload");
+      if (savedContext) {
+        setReportContext(JSON.parse(savedContext) as AgentReportContext);
+        setState("upload");
+      } else {
+        setState("context");
+      }
     }
   }, []);
 
   const handleLogin = (key: string) => {
     setAccessKey(key);
+    setState("context");
+  };
+
+  const handleContextSubmit = (context: AgentReportContext) => {
+    setReportContext(context);
+    sessionStorage.setItem(REPORT_CONTEXT_STORAGE_KEY, JSON.stringify(context));
     setState("upload");
   };
 
@@ -321,7 +347,6 @@ export default function Home() {
       if (results) finalResults[id] = results;
     });
 
-    setEvaluationDate(new Date());
     setState("results");
 
     if (meta && Object.keys(finalResults).length > 1) {
@@ -353,6 +378,7 @@ export default function Home() {
   };
 
   const handleDownloadPdf = async () => {
+    if (!reportContext) return;
     if (activeTab === "meta" || activeTab === "overview" || !activeTab) return;
     const config = llmConfigs.find((c) => c.id === activeTab);
     if (!config) return;
@@ -364,11 +390,11 @@ export default function Home() {
       const handle = chartRefsMap.current[config.id];
       const container = handle?.getChartsContainer() ?? null;
       await generateSingleEvaluatorPdf({
+        reportContext,
         config,
         rows,
         results,
         chartsContainer: container,
-        evaluationDate,
       });
     } finally {
       setPdfGenerating(false);
@@ -376,6 +402,7 @@ export default function Home() {
   };
 
   const handleDownloadAllPdf = async () => {
+    if (!reportContext) return;
     setPdfGenerating(true);
     try {
       const containers: Record<string, HTMLDivElement | null> = {};
@@ -384,12 +411,15 @@ export default function Home() {
         containers[config.id] = handle?.getChartsContainer() ?? null;
       }
       await generateAllEvaluatorsPdf({
+        reportContext,
         configs: llmConfigs,
         rows,
         allResults,
         chartsContainers: containers,
+        overviewContainer: overviewPanelRef.current,
+        metaContainer: metaPanelRef.current,
+        includeMetaSection: Boolean(metaEnabled && consistency),
         consistency,
-        evaluationDate,
       });
     } finally {
       setPdfGenerating(false);
@@ -397,12 +427,13 @@ export default function Home() {
   };
 
   const handleDownloadTex = () => {
+    if (!reportContext) return;
     downloadTexFile({
+      reportContext,
       configs: llmConfigs,
       rows,
       allResults,
       consistency,
-      evaluationDate,
     });
   };
 
@@ -419,6 +450,38 @@ export default function Home() {
 
   if (state === "login") {
     return <LoginGate onLogin={handleLogin} />;
+  }
+
+  if (state === "context") {
+    return (
+      <div className="min-h-screen">
+        <header className="border-b border-[#0e3d66] bg-[#165185]">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
+            <h1 className="text-lg font-semibold tracking-tight text-white">
+              MetaEvaluaciones PRO
+            </h1>
+            <button
+              onClick={() => {
+                sessionStorage.removeItem("accessKey");
+                sessionStorage.removeItem(REPORT_CONTEXT_STORAGE_KEY);
+                setAccessKey("");
+                setReportContext(null);
+                setState("login");
+              }}
+              className="text-sm text-white/60 hover:text-white transition-colors"
+            >
+              Salir
+            </button>
+          </div>
+        </header>
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 py-10">
+          <AgentContextForm
+            initialValue={reportContext}
+            onSubmit={handleContextSubmit}
+          />
+        </main>
+      </div>
+    );
   }
 
   const totalProgress = Object.values(allProgress).reduce(
@@ -446,7 +509,9 @@ export default function Home() {
               <button
                 onClick={() => {
                   sessionStorage.removeItem("accessKey");
+                  sessionStorage.removeItem(REPORT_CONTEXT_STORAGE_KEY);
                   setAccessKey("");
+                  setReportContext(null);
                   setState("login");
                 }}
                 className="text-sm text-white/60 hover:text-white transition-colors"
@@ -656,18 +721,22 @@ export default function Home() {
               </div>
 
               {activeTab === "overview" ? (
-                <AgentComparisonPanel
-                  configs={llmConfigs}
-                  allResults={allResults}
-                />
+                <div ref={overviewPanelRef}>
+                  <AgentComparisonPanel
+                    configs={llmConfigs}
+                    allResults={allResults}
+                  />
+                </div>
               ) : activeTab === "meta" ? (
                 <div>
                   {consistency && (
-                    <MetaEvaluationPanel
-                      consistency={consistency}
-                      metaAnalysis={metaAnalysis}
-                      metaAnalyzing={metaAnalyzing}
-                    />
+                    <div ref={metaPanelRef}>
+                      <MetaEvaluationPanel
+                        consistency={consistency}
+                        metaAnalysis={metaAnalysis}
+                        metaAnalyzing={metaAnalyzing}
+                      />
+                    </div>
                   )}
                 </div>
               ) : (
@@ -696,6 +765,23 @@ export default function Home() {
 
             {/* Hidden chart renders for non-active tabs (needed for "Descargar todo en PDF") */}
             <div className="absolute left-[-9999px] top-0" aria-hidden="true">
+              {activeTab !== "overview" && (
+                <div ref={overviewPanelRef} style={{ width: 1200 }}>
+                  <AgentComparisonPanel
+                    configs={llmConfigs}
+                    allResults={allResults}
+                  />
+                </div>
+              )}
+              {metaEnabled && consistency && activeTab !== "meta" && (
+                <div ref={metaPanelRef} style={{ width: 1200 }}>
+                  <MetaEvaluationPanel
+                    consistency={consistency}
+                    metaAnalysis={metaAnalysis}
+                    metaAnalyzing={metaAnalyzing}
+                  />
+                </div>
+              )}
               {llmConfigs
                 .filter((c) => c.id !== activeTab)
                 .map((config) => {

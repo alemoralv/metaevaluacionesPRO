@@ -49,3 +49,20 @@ export interface QuestionConsistency {
   usefulnessStdDev: number;
   overallStdDev: number;
 }
+
+export interface AgentCapabilities {
+  webSearch: boolean;
+  generalKnowledge: boolean;
+  orchestration: boolean;
+  tools: boolean;
+}
+
+export interface AgentReportContext {
+  evaluatorName: string;
+  agentName: string;
+  modelName: string;
+  knowledgeSource: string;
+  capabilities: AgentCapabilities;
+  testPhase: string;
+  systemInstructions?: string;
+}

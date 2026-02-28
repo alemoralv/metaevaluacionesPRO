@@ -1,4 +1,5 @@
 import {
+  AgentReportContext,
   EvaluationRow,
   EvaluationResult,
   LLMConfig,
@@ -24,6 +25,10 @@ const MONTHS_ES = [
 
 function formatDateES(d: Date): string {
   return `${d.getDate()} de ${MONTHS_ES[d.getMonth()]} de ${d.getFullYear()}`;
+}
+
+function boolToYesNo(value: boolean): string {
+  return value ? "si" : "no";
 }
 
 function escapeTex(text: string): string {
@@ -127,8 +132,8 @@ function generatePreamble(headerText: string): string {
 \\setlength{\\parindent}{0pt}
 \\setlength{\\parskip}{0.7em}
 %% Colores de marca
-\\definecolor{profublue}{HTML}{165185}
-\\definecolor{profugold}{HTML}{F0883C}
+\\definecolor{profublue}{HTML}{004a99}
+\\definecolor{profugold}{HTML}{ffc20e}
 \\definecolor{profred}{HTML}{b91c1c}
 \\definecolor{profyellow}{HTML}{a16207}
 \\definecolor{profgreen}{HTML}{15803d}
@@ -162,6 +167,9 @@ function generatePreamble(headerText: string): string {
 \\setlist[itemize]{leftmargin=*, topsep=6pt, itemsep=3pt, parsep=2pt, labelsep=0.6em}
 \\setlist[itemize,1]{label=\\textcolor{profugold}{\\large\\textbullet}}
 \\setlist[itemize,2]{label=\\textcolor{profublue}{\\normalsize\\textbullet}}
+\\setlist[itemize,3]{label=\\textcolor{profugold}{\\small\\ding{118}}}
+\\setlist[itemize,4]{label=\\textcolor{profugold}{\\tiny\\textbullet}}
+\\setlist[itemize,5]{label=\\textcolor{profugold}{\\tiny\\textbullet}}
 \\setlist[enumerate]{leftmargin=*, topsep=6pt, itemsep=3pt, parsep=2pt, label=\\textcolor{profublue}{\\arabic*.}}
 %% Links
 \\hypersetup{
@@ -173,7 +181,7 @@ function generatePreamble(headerText: string): string {
 `;
 }
 
-function generateCoverPage(subtitle: string, date: Date): string {
+function generateCoverPage(reportContext: AgentReportContext, date: Date): string {
   return `
 \\begin{titlepage}
     \\centering
@@ -182,19 +190,59 @@ function generateCoverPage(subtitle: string, date: Date): string {
     \\vspace{0.8cm}
     {\\color{profugold}\\rule{0.4\\textwidth}{2pt}\\par}
     \\vspace{1.2cm}
-    {\\fontsize{28}{34}\\selectfont\\bfseries\\textcolor{profublue}{Metaevaluación de}\\par}
-    {\\fontsize{28}{34}\\selectfont\\bfseries\\textcolor{profublue}{Evaluadores LLM}\\par}
+    {\\fontsize{28}{34}\\selectfont\\bfseries\\textcolor{profublue}{Evaluación del Agente:}\\par}
+    {\\fontsize{28}{34}\\selectfont\\bfseries\\textcolor{profublue}{${escapeTex(reportContext.agentName)}}\\par}
     \\vspace{0.6cm}
-    {\\Large\\bfseries\\textcolor{profublue}{${escapeTex(subtitle)}}\\par}
+    {\\Large\\bfseries\\textcolor{profublue}{Fase de prueba: ${escapeTex(reportContext.testPhase)}}\\par}
     \\vspace{0.8cm}
     {\\color{profugold}\\rule{0.4\\textwidth}{2pt}\\par}
     \\vspace{2cm}
     {\\large\\bfseries Equipo de Inteligencia Artificial\\par}
+    \\vspace{0.5cm}
+    {\\normalsize Evaluador: ${escapeTex(reportContext.evaluatorName)}\\par}
     \\vspace{1cm}
     {\\normalsize Fecha: ${formatDateES(date)}\\par}
     \\vfill
 \\end{titlepage}
 `;
+}
+
+function generateAgentConfigurationSection(reportContext: AgentReportContext): string {
+  let tex = `\\section{Configuración del Agente}\n\n`;
+  tex += `El agente \\textbf{${escapeTex(reportContext.agentName)}} fue evaluado utilizando el modelo \\textbf{${escapeTex(reportContext.modelName)}}. A continuación se detallan los parámetros de configuración con los que se realizó la prueba.\n\n`;
+
+  tex += `\\subsection{Base de conocimiento}\n\n`;
+  tex += `El agente tuvo acceso a los siguientes documentos o recursos como base de conocimiento:\n\n`;
+  tex += `\\vspace{0.3em}\n`;
+  tex += `\\quad \\textbf{${escapeTex(reportContext.knowledgeSource)}}\n\n`;
+
+  tex += `\\subsection{Parámetros adicionales}\n\n`;
+  tex += `\\renewcommand{\\arraystretch}{1.35}\n`;
+  tex += `\\begin{center}\n`;
+  tex += `\\begin{tabularx}{0.85\\textwidth}{l X}\n`;
+  tex += `\\toprule\n`;
+  tex += `\\textcolor{profublue}{\\textbf{Parámetro}} & \\textcolor{profublue}{\\textbf{Valor}} \\\\\n`;
+  tex += `\\midrule\n`;
+  tex += `Búsqueda web & ${escapeTex(boolToYesNo(reportContext.capabilities.webSearch))} \\\\\n`;
+  tex += `Conocimiento general & ${escapeTex(boolToYesNo(reportContext.capabilities.generalKnowledge))} \\\\\n`;
+  tex += `Orquestación & ${escapeTex(boolToYesNo(reportContext.capabilities.orchestration))} \\\\\n`;
+  tex += `Herramientas & ${escapeTex(boolToYesNo(reportContext.capabilities.tools))} \\\\\n`;
+  tex += `\\bottomrule\n`;
+  tex += `\\end{tabularx}\n`;
+  tex += `\\end{center}\n\n`;
+
+  tex += `\\subsection{Fase de prueba}\n\n`;
+  tex += `\\textbf{${escapeTex(reportContext.testPhase)}}\n\n`;
+
+  if (reportContext.systemInstructions?.trim()) {
+    tex += `\\subsection{Instrucciones del sistema}\n\n`;
+    tex += `Las instrucciones proporcionadas al agente fueron las siguientes:\n\n`;
+    tex += `\\begin{quote}\n`;
+    tex += `\\footnotesize\\itshape ${escapeTex(reportContext.systemInstructions)}\n`;
+    tex += `\\end{quote}\n\n`;
+  }
+
+  return tex;
 }
 
 function generatePanoramaGeneralSection(
@@ -426,24 +474,28 @@ function generateEvaluatorSection(
 }
 
 export interface TexReportParams {
+  reportContext: AgentReportContext;
   configs: LLMConfig[];
   rows: EvaluationRow[];
   allResults: Record<string, EvaluationResult[]>;
   consistency: QuestionConsistency[] | null;
-  evaluationDate: Date;
 }
 
 export function generateFullTexReport(params: TexReportParams): string {
-  const { configs, rows, allResults, consistency, evaluationDate } = params;
-  const headerText = "Metaevaluación — Reporte Consolidado";
+  const { reportContext, configs, rows, allResults, consistency } = params;
+  const evaluationDate = new Date();
+  const headerText = `Evaluación del agente: ${reportContext.agentName} | ${reportContext.evaluatorName}`;
 
   let tex = generatePreamble(headerText);
   tex += `\n\\begin{document}\n`;
-  tex += generateCoverPage("Reporte Consolidado", evaluationDate);
+  tex += generateCoverPage(reportContext, evaluationDate);
 
   tex += `\\newpage\n`;
   tex += `\\tableofcontents\n`;
   tex += `\\newpage\n\n`;
+
+  tex += generateAgentConfigurationSection(reportContext);
+  tex += `\\newpage\n`;
 
   tex += generatePanoramaGeneralSection(configs, allResults, consistency);
 
@@ -458,7 +510,7 @@ export function generateFullTexReport(params: TexReportParams): string {
   tex += `\\vspace{2em}\n`;
   tex += `{\\color{profugold}\\rule{\\textwidth}{1.5pt}}\n\n`;
   tex += `\\begin{center}\n`;
-  tex += `\\textit{Fin del reporte de metaevaluación.}\n`;
+  tex += `\\textit{Fin del reporte de evaluación.}\n`;
   tex += `\\end{center}\n\n`;
   tex += `\\end{document}\n`;
 
@@ -471,7 +523,7 @@ export function downloadTexFile(params: TexReportParams) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `metaevaluacion_consolidado_${formatDateES(params.evaluationDate).replace(/ /g, "_")}.tex`;
+  a.download = `evaluacion_agente_${formatDateES(new Date()).replace(/ /g, "_")}.tex`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

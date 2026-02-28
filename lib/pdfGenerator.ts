@@ -1,6 +1,7 @@
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import {
+  AgentReportContext,
   EvaluationRow,
   EvaluationResult,
   LLMConfig,
@@ -8,8 +9,8 @@ import {
   EnrichedRow,
 } from "./types";
 
-const BLUE: [number, number, number] = [22, 81, 133];
-const GOLD: [number, number, number] = [240, 136, 60];
+const BLUE: [number, number, number] = [0, 74, 153];
+const GOLD: [number, number, number] = [255, 194, 14];
 const DARK: [number, number, number] = [30, 30, 30];
 const GRAY: [number, number, number] = [100, 100, 100];
 const LIGHT_GRAY: [number, number, number] = [200, 200, 200];
@@ -46,6 +47,10 @@ const MONTHS_ES = [
 
 function formatDateES(d: Date): string {
   return `${d.getDate()} de ${MONTHS_ES[d.getMonth()]} de ${d.getFullYear()}`;
+}
+
+function boolToYesNo(value: boolean): string {
+  return value ? "si" : "no";
 }
 
 function scoreColor(score: number): [number, number, number] {
@@ -97,7 +102,7 @@ function addHeaderFooter(doc: jsPDF, headerText?: string) {
 
 function addCoverPage(
   doc: jsPDF,
-  subtitle: string,
+  reportContext: AgentReportContext,
   date: Date
 ) {
   doc.setFillColor(255, 255, 255);
@@ -116,13 +121,15 @@ function addCoverPage(
   doc.setFontSize(24);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...BLUE);
-  doc.text("Metaevaluación de", PAGE_W / 2, 115, { align: "center" });
-  doc.text("Evaluadores LLM", PAGE_W / 2, 128, { align: "center" });
+  doc.text("Evaluación del Agente:", PAGE_W / 2, 115, { align: "center" });
+  doc.text(reportContext.agentName, PAGE_W / 2, 128, { align: "center" });
 
   doc.setFontSize(14);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...BLUE);
-  doc.text(subtitle, PAGE_W / 2, 148, { align: "center" });
+  doc.text(`Fase de prueba: ${reportContext.testPhase}`, PAGE_W / 2, 148, {
+    align: "center",
+  });
 
   doc.setDrawColor(...GOLD);
   doc.setLineWidth(2);
@@ -135,8 +142,14 @@ function addCoverPage(
 
   doc.setFontSize(11);
   doc.setFont("helvetica", "normal");
+  doc.text(`Evaluador: ${reportContext.evaluatorName}`, PAGE_W / 2, 192, {
+    align: "center",
+  });
+
+  doc.setFontSize(11);
+  doc.setFont("helvetica", "normal");
   doc.setTextColor(...DARK);
-  doc.text(`Fecha: ${formatDateES(date)}`, PAGE_W / 2, 200, { align: "center" });
+  doc.text(`Fecha: ${formatDateES(date)}`, PAGE_W / 2, 202, { align: "center" });
 }
 
 function addSectionTitle(doc: jsPDF, title: string, y: number): number {
@@ -226,6 +239,94 @@ function addEvaluatorConfigSection(
   return y + 6;
 }
 
+function addAgentContextSection(
+  doc: jsPDF,
+  reportContext: AgentReportContext,
+  y: number
+): number {
+  y = addSectionTitle(doc, "Configuración del Agente", y);
+
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...DARK);
+  const introLines = doc.splitTextToSize(
+    `El agente ${reportContext.agentName} fue evaluado utilizando el modelo ${reportContext.modelName}. A continuación se detallan los parámetros de configuración con los que se realizó la prueba.`,
+    CONTENT_W
+  );
+  doc.text(introLines, MARGIN_L, y);
+  y += introLines.length * 5 + 6;
+
+  y = addSubsectionTitle(doc, "Base de conocimiento", y);
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...DARK);
+  const kbLines = doc.splitTextToSize(
+    `El agente tuvo acceso a: ${reportContext.knowledgeSource}`,
+    CONTENT_W
+  );
+  doc.text(kbLines, MARGIN_L, y);
+  y += kbLines.length * 5 + 5;
+
+  y = addSubsectionTitle(doc, "Parámetros adicionales", y);
+  const tableRows: [string, string][] = [
+    ["Búsqueda web", boolToYesNo(reportContext.capabilities.webSearch)],
+    [
+      "Conocimiento general",
+      boolToYesNo(reportContext.capabilities.generalKnowledge),
+    ],
+    ["Orquestación", boolToYesNo(reportContext.capabilities.orchestration)],
+    ["Herramientas", boolToYesNo(reportContext.capabilities.tools)],
+  ];
+  const rowHeight = 7;
+  y = ensureSpace(doc, rowHeight * (tableRows.length + 1) + 10, y);
+  doc.setFillColor(...BLUE);
+  doc.rect(MARGIN_L, y - 5, CONTENT_W, rowHeight, "F");
+  doc.setTextColor(...WHITE);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.text("Parámetro", MARGIN_L + 2, y);
+  doc.text("Valor", MARGIN_L + CONTENT_W - 30, y);
+  y += rowHeight - 1;
+
+  doc.setTextColor(...DARK);
+  doc.setFont("helvetica", "normal");
+  tableRows.forEach((row, idx) => {
+    if (idx % 2 === 0) {
+      doc.setFillColor(245, 247, 250);
+      doc.rect(MARGIN_L, y - 4.5, CONTENT_W, rowHeight, "F");
+    }
+    doc.text(row[0], MARGIN_L + 2, y);
+    doc.text(row[1], MARGIN_L + CONTENT_W - 30, y);
+    y += rowHeight;
+  });
+  y += 3;
+
+  y = addSubsectionTitle(doc, "Fase de prueba", y);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(...DARK);
+  doc.text(reportContext.testPhase, MARGIN_L, y);
+  y += 6;
+
+  if (reportContext.systemInstructions?.trim()) {
+    y = addSubsectionTitle(doc, "Instrucciones del sistema", y);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(...GRAY);
+    const trimmed = reportContext.systemInstructions.length > 2500
+      ? `${reportContext.systemInstructions.slice(0, 2500)}...`
+      : reportContext.systemInstructions;
+    const instructionLines = doc.splitTextToSize(trimmed, CONTENT_W - 4);
+    y = ensureSpace(doc, instructionLines.length * 3.8 + 8, y);
+    doc.setDrawColor(220, 220, 220);
+    doc.roundedRect(MARGIN_L, y - 3.5, CONTENT_W, instructionLines.length * 3.8 + 5, 1.5, 1.5, "S");
+    doc.text(instructionLines, MARGIN_L + 2, y);
+    y += instructionLines.length * 3.8 + 6;
+  }
+
+  return y + 4;
+}
+
 function addScoreSummary(
   doc: jsPDF,
   results: EvaluationResult[],
@@ -305,6 +406,49 @@ async function addChartsSection(
   }
 
   return y;
+}
+
+async function addCapturedFullPageSection(
+  doc: jsPDF,
+  title: string,
+  container: HTMLDivElement | null,
+  captureErrorMessage: string
+): Promise<number> {
+  doc.addPage();
+  let y = MARGIN_T + 8;
+  y = addSectionTitle(doc, title, y);
+
+  if (!container) {
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "italic");
+    doc.setTextColor(...GRAY);
+    doc.text(captureErrorMessage, MARGIN_L, y);
+    return y + 8;
+  }
+
+  try {
+    const imgData = await captureElement(container);
+    const rawW = container.offsetWidth || 1;
+    const rawH = container.offsetHeight || 1;
+
+    const maxW = CONTENT_W;
+    const maxH = PAGE_H - MARGIN_B - y;
+    const scale = Math.min(maxW / rawW, maxH / rawH);
+
+    const drawW = rawW * scale;
+    const drawH = rawH * scale;
+    const drawX = MARGIN_L + (CONTENT_W - drawW) / 2;
+    const drawY = y + (maxH - drawH) / 2;
+
+    doc.addImage(imgData, "PNG", drawX, drawY, drawW, drawH);
+    return drawY + drawH + 8;
+  } catch {
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "italic");
+    doc.setTextColor(...GRAY);
+    doc.text(captureErrorMessage, MARGIN_L, y);
+    return y + 8;
+  }
 }
 
 function addConversationEntry(
@@ -595,54 +739,90 @@ function addPageNumbers(doc: jsPDF, headerText: string) {
 }
 
 export interface SinglePdfParams {
+  reportContext: AgentReportContext;
   config: LLMConfig;
   rows: EvaluationRow[];
   results: EvaluationResult[];
   chartsContainer: HTMLDivElement | null;
-  evaluationDate: Date;
 }
 
 export async function generateSingleEvaluatorPdf(params: SinglePdfParams) {
-  const { config, rows, results, chartsContainer, evaluationDate } = params;
+  const { reportContext, config, rows, results, chartsContainer } = params;
+  const evaluationDate = new Date();
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const label = `${config.model} (T=${config.temperature})`;
 
-  addCoverPage(doc, label, evaluationDate);
+  addCoverPage(doc, reportContext, evaluationDate);
 
   doc.addPage();
   let y = MARGIN_T + 8;
 
+  y = addAgentContextSection(doc, reportContext, y);
   y = addEvaluatorConfigSection(doc, [config], y);
   y = addScoreSummary(doc, results, y);
   y = await addChartsSection(doc, chartsContainer, y);
   y = addConversationSection(doc, rows, results, label, y);
   addEndRule(doc, y);
 
-  addPageNumbers(doc, `Metaevaluación — ${label}`);
+  addPageNumbers(
+    doc,
+    `Evaluación del agente: ${reportContext.agentName} | ${reportContext.evaluatorName}`
+  );
 
   const safeModel = config.model.replace(/[^a-zA-Z0-9._-]/g, "_");
-  doc.save(`metaevaluacion_${safeModel}_T${config.temperature}.pdf`);
+  doc.save(`evaluacion_${safeModel}_T${config.temperature}.pdf`);
 }
 
 export interface AllPdfParams {
+  reportContext: AgentReportContext;
   configs: LLMConfig[];
   rows: EvaluationRow[];
   allResults: Record<string, EvaluationResult[]>;
   chartsContainers: Record<string, HTMLDivElement | null>;
+  overviewContainer: HTMLDivElement | null;
+  metaContainer: HTMLDivElement | null;
+  includeMetaSection: boolean;
   consistency: QuestionConsistency[] | null;
-  evaluationDate: Date;
 }
 
 export async function generateAllEvaluatorsPdf(params: AllPdfParams) {
-  const { configs, rows, allResults, chartsContainers, consistency, evaluationDate } = params;
+  const {
+    configs,
+    rows,
+    allResults,
+    chartsContainers,
+    overviewContainer,
+    metaContainer,
+    includeMetaSection,
+    consistency,
+    reportContext,
+  } = params;
+  const evaluationDate = new Date();
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
-  addCoverPage(doc, "Reporte Consolidado", evaluationDate);
+  addCoverPage(doc, reportContext, evaluationDate);
 
   doc.addPage();
   let y = MARGIN_T + 8;
 
+  y = addAgentContextSection(doc, reportContext, y);
   y = addEvaluatorConfigSection(doc, configs, y);
+
+  y = await addCapturedFullPageSection(
+    doc,
+    "Panorama General",
+    overviewContainer,
+    "[No se pudo capturar el Panorama General]"
+  );
+
+  if (includeMetaSection) {
+    y = await addCapturedFullPageSection(
+      doc,
+      "Análisis Meta-evaluador",
+      metaContainer,
+      "[No se pudo capturar el Análisis Meta-evaluador]"
+    );
+  }
 
   for (const config of configs) {
     const results = allResults[config.id] || [];
@@ -663,7 +843,10 @@ export async function generateAllEvaluatorsPdf(params: AllPdfParams) {
   }
 
   addEndRule(doc, y);
-  addPageNumbers(doc, "Metaevaluación — Reporte Consolidado");
+  addPageNumbers(
+    doc,
+    `Evaluación del agente: ${reportContext.agentName} | ${reportContext.evaluatorName}`
+  );
 
-  doc.save(`metaevaluacion_consolidado_${formatDateES(evaluationDate).replace(/ /g, "_")}.pdf`);
+  doc.save(`evaluacion_agente_${formatDateES(evaluationDate).replace(/ /g, "_")}.pdf`);
 }
