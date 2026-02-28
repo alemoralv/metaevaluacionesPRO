@@ -166,88 +166,110 @@ export default function Home() {
     setState("configure");
   };
 
-  const streamEvaluation = useCallback(
-    async (config: LLMConfig, evalRows: EvaluationRow[]) => {
-      try {
-        const response = await fetch("/api/evaluate", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-access-key": accessKey,
+  const streamBatch = useCallback(
+    async (
+      config: LLMConfig,
+      batchRows: EvaluationRow[],
+      indexOffset: number,
+      collected: EvaluationResult[],
+      totalRows: number
+    ): Promise<boolean> => {
+      const response = await fetch("/api/evaluate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-access-key": accessKey,
+        },
+        body: JSON.stringify({
+          rows: batchRows,
+          llmConfig: {
+            model: config.model,
+            temperature: config.temperature,
+            topP: config.topP,
+            maxTokens: config.maxTokens,
           },
-          body: JSON.stringify({
-            rows: evalRows,
-            llmConfig: {
-              model: config.model,
-              temperature: config.temperature,
-              topP: config.topP,
-              maxTokens: config.maxTokens,
-            },
-          }),
-        });
+        }),
+      });
 
-        if (response.status === 401) {
-          sessionStorage.removeItem("accessKey");
-          setAccessKey("");
-          setState("login");
-          return;
-        }
+      if (response.status === 401) {
+        sessionStorage.removeItem("accessKey");
+        setAccessKey("");
+        setState("login");
+        return false;
+      }
 
-        if (!response.ok) {
-          const errData = await response.json();
-          setError(
-            (prev) =>
-              `${prev ? prev + "\n" : ""}${llmLabel(config)}: ${errData.error || "Error"}`
-          );
-          return;
-        }
+      if (!response.ok) {
+        const errData = await response.json();
+        setError(
+          (prev) =>
+            `${prev ? prev + "\n" : ""}${llmLabel(config)}: ${errData.error || "Error"}`
+        );
+        return false;
+      }
 
-        const reader = response.body!.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        const collected: EvaluationResult[] = [];
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
 
-          for (const line of lines) {
-            if (line.trim()) {
-              try {
-                const result: EvaluationResult = JSON.parse(line);
-                collected.push(result);
-                setAllResults((prev) => ({
-                  ...prev,
-                  [config.id]: [...collected],
-                }));
-                setAllProgress((prev) => ({
-                  ...prev,
-                  [config.id]: { current: collected.length, total: evalRows.length },
-                }));
-              } catch {
-                // skip malformed
-              }
+        for (const line of lines) {
+          if (line.trim()) {
+            try {
+              const result: EvaluationResult = JSON.parse(line);
+              result.index = result.index + indexOffset;
+              collected.push(result);
+              setAllResults((prev) => ({
+                ...prev,
+                [config.id]: [...collected],
+              }));
+              setAllProgress((prev) => ({
+                ...prev,
+                [config.id]: { current: collected.length, total: totalRows },
+              }));
+            } catch {
+              // skip malformed
             }
           }
         }
+      }
 
-        if (buffer.trim()) {
-          try {
-            const result: EvaluationResult = JSON.parse(buffer);
-            collected.push(result);
-            setAllResults((prev) => ({
-              ...prev,
-              [config.id]: [...collected],
-            }));
-          } catch {
-            // skip
-          }
+      if (buffer.trim()) {
+        try {
+          const result: EvaluationResult = JSON.parse(buffer);
+          result.index = result.index + indexOffset;
+          collected.push(result);
+          setAllResults((prev) => ({
+            ...prev,
+            [config.id]: [...collected],
+          }));
+        } catch {
+          // skip
         }
+      }
 
+      return true;
+    },
+    [accessKey]
+  );
+
+  const BATCH_SIZE = 10;
+
+  const streamEvaluation = useCallback(
+    async (config: LLMConfig, evalRows: EvaluationRow[]) => {
+      const collected: EvaluationResult[] = [];
+      try {
+        for (let offset = 0; offset < evalRows.length; offset += BATCH_SIZE) {
+          const batch = evalRows.slice(offset, offset + BATCH_SIZE);
+          const ok = await streamBatch(config, batch, offset, collected, evalRows.length);
+          if (!ok) return undefined;
+        }
         return collected;
       } catch (err) {
         setError(
@@ -257,7 +279,7 @@ export default function Home() {
         return undefined;
       }
     },
-    [accessKey]
+    [streamBatch]
   );
 
   const handleStartEvaluation = async (
