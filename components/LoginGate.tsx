@@ -50,6 +50,17 @@ export default function LoginGate({ onLogin }: LoginGateProps) {
           <p className="text-sm text-gray-500 mt-1">
             Evaluación automática de respuestas de IA
           </p>
+          <p className="text-xs text-gray-400 mt-1">
+            by{" "}
+            <a
+              href="https://alemoralv.github.io/alemoralv/#home"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-gray-600 underline decoration-gray-300 hover:decoration-gray-500 transition-colors"
+            >
+              alemoralv
+            </a>
+          </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">

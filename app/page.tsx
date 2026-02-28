@@ -457,9 +457,22 @@ export default function Home() {
       <div className="min-h-screen">
         <header className="border-b border-[#0e3d66] bg-[#165185]">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
-            <h1 className="text-lg font-semibold tracking-tight text-white">
-              MetaEvaluaciones PRO
-            </h1>
+            <div className="flex items-baseline gap-2">
+              <h1 className="text-lg font-semibold tracking-tight text-white">
+                MetaEvaluaciones PRO
+              </h1>
+              <span className="text-xs text-white/40">
+                by{" "}
+                <a
+                  href="https://alemoralv.github.io/alemoralv/#home"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-white/70 underline decoration-white/30 hover:decoration-white/60 transition-colors"
+                >
+                  alemoralv
+                </a>
+              </span>
+            </div>
             <button
               onClick={() => {
                 sessionStorage.removeItem("accessKey");
@@ -493,9 +506,22 @@ export default function Home() {
     <div className="min-h-screen">
       <header className="border-b border-[#0e3d66] bg-[#165185]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
-          <h1 className="text-lg font-semibold tracking-tight text-white">
-            MetaEvaluaciones PRO
-          </h1>
+          <div className="flex items-baseline gap-2">
+            <h1 className="text-lg font-semibold tracking-tight text-white">
+              MetaEvaluaciones PRO
+            </h1>
+            <span className="text-xs text-white/40">
+              by{" "}
+              <a
+                href="https://alemoralv.github.io/alemoralv/#home"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-white/70 underline decoration-white/30 hover:decoration-white/60 transition-colors"
+              >
+                alemoralv
+              </a>
+            </span>
+          </div>
           {state !== "evaluating" && (
             <div className="flex items-center gap-3">
               {(state === "results" || state === "configure") && (
