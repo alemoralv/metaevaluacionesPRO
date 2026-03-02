@@ -10,6 +10,7 @@ import ResultsTable from "@/components/ResultsTable";
 import ScoreCharts, { ScoreChartsHandle } from "@/components/ScoreCharts";
 import MetaEvaluationPanel from "@/components/MetaEvaluationPanel";
 import AgentComparisonPanel from "@/components/AgentComparisonPanel";
+import html2canvas from "html2canvas";
 import {
   EvaluationRow,
   EvaluationResult,
@@ -150,6 +151,7 @@ export default function Home() {
 
   const chartRefsMap = useRef<Record<string, ScoreChartsHandle | null>>({});
   const overviewPanelRef = useRef<HTMLDivElement | null>(null);
+  const overviewChartsCaptureRef = useRef<HTMLDivElement | null>(null);
   const metaPanelRef = useRef<HTMLDivElement | null>(null);
   const allResultsRef = useRef(allResults);
   allResultsRef.current = allResults;
@@ -416,25 +418,51 @@ export default function Home() {
         rows,
         allResults,
         chartsContainers: containers,
-        overviewContainer: overviewPanelRef.current,
-        metaContainer: metaPanelRef.current,
+        overviewChartsContainer: overviewChartsCaptureRef.current,
         includeMetaSection: Boolean(metaEnabled && consistency),
         consistency,
+        metaAnalysis,
       });
     } finally {
       setPdfGenerating(false);
     }
   };
 
-  const handleDownloadTex = () => {
+  const handleDownloadTex = async () => {
     if (!reportContext) return;
-    downloadTexFile({
-      reportContext,
-      configs: llmConfigs,
-      rows,
-      allResults,
-      consistency,
-    });
+    setPdfGenerating(true);
+    try {
+      let panoramaImages:
+        | { filename: string; dataUrl: string; caption: string }[]
+        | undefined;
+      const panoramaCaptureTarget = overviewChartsCaptureRef.current;
+      if (panoramaCaptureTarget) {
+        const canvas = await html2canvas(panoramaCaptureTarget, {
+          backgroundColor: "#ffffff",
+          scale: 2,
+          useCORS: true,
+          logging: false,
+        });
+        panoramaImages = [
+          {
+            filename: "panorama-general-graficas.png",
+            dataUrl: canvas.toDataURL("image/png"),
+            caption: "Panorama general - KPIs y gráficas",
+          },
+        ];
+      }
+      downloadTexFile({
+        reportContext,
+        configs: llmConfigs,
+        rows,
+        allResults,
+        consistency,
+        metaAnalysis,
+        panoramaImages,
+      });
+    } finally {
+      setPdfGenerating(false);
+    }
   };
 
   const handleReset = () => {
@@ -791,6 +819,13 @@ export default function Home() {
 
             {/* Hidden chart renders for non-active tabs (needed for "Descargar todo en PDF") */}
             <div className="absolute left-[-9999px] top-0" aria-hidden="true">
+              <div ref={overviewChartsCaptureRef} style={{ width: 1200 }}>
+                <AgentComparisonPanel
+                  configs={llmConfigs}
+                  allResults={allResults}
+                  hideTables
+                />
+              </div>
               {activeTab !== "overview" && (
                 <div ref={overviewPanelRef} style={{ width: 1200 }}>
                   <AgentComparisonPanel

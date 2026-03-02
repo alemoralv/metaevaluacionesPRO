@@ -5,6 +5,7 @@ import {
   LLMConfig,
   QuestionConsistency,
 } from "./types";
+import JSZip from "jszip";
 
 type ScoreField = "accuracy" | "completeness" | "relevance" | "coherence" | "clarity" | "usefulness" | "overallScore";
 
@@ -98,6 +99,35 @@ function stdDevColorCmd(value: number): string {
   return "\\textcolor{red!70!black}";
 }
 
+const STD_DEV_DIMS: { label: string; field: keyof QuestionConsistency }[] = [
+  { label: "Precisión", field: "accuracyStdDev" },
+  { label: "Completitud", field: "completenessStdDev" },
+  { label: "Relevancia", field: "relevanceStdDev" },
+  { label: "Coherencia", field: "coherenceStdDev" },
+  { label: "Claridad", field: "clarityStdDev" },
+  { label: "Utilidad", field: "usefulnessStdDev" },
+  { label: "General", field: "overallStdDev" },
+];
+
+interface EvaluatorStats {
+  config: LLMConfig;
+  label: string;
+  count: number;
+  bajo: number;
+  medio: number;
+  alto: number;
+  dims: Record<
+    ScoreField,
+    { avg: number; median: number; min: number; max: number; stdDev: number; passRate: number }
+  >;
+}
+
+export interface TexImageAsset {
+  filename: string;
+  dataUrl: string;
+  caption: string;
+}
+
 function generatePreamble(headerText: string): string {
   return `\\documentclass[11pt, a4paper]{article}
 %% Idioma y codificación
@@ -178,6 +208,7 @@ function generatePreamble(headerText: string): string {
   urlcolor=profublue,
   citecolor=profublue
 }
+\\graphicspath{{assets/}}
 `;
 }
 
@@ -237,23 +268,78 @@ function generateAgentConfigurationSection(reportContext: AgentReportContext): s
   if (reportContext.systemInstructions?.trim()) {
     tex += `\\subsection{Instrucciones del sistema}\n\n`;
     tex += `Las instrucciones proporcionadas al agente fueron las siguientes:\n\n`;
-    tex += `\\begin{quote}\n`;
-    tex += `\\footnotesize\\itshape ${escapeTex(reportContext.systemInstructions)}\n`;
-    tex += `\\end{quote}\n\n`;
+    const lines = reportContext.systemInstructions
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+    for (const line of lines) {
+      tex += `\\vspace{0.4em}\n`;
+      tex += `\\noindent\\begin{minipage}{\\textwidth}\n`;
+      tex += `\\footnotesize\\itshape ${escapeTex(line)}\n`;
+      tex += `\\end{minipage}\n`;
+    }
+    tex += `\n`;
   }
 
   return tex;
 }
 
+function buildEvaluatorStats(
+  configs: LLMConfig[],
+  allResults: Record<string, EvaluationResult[]>
+): EvaluatorStats[] {
+  return configs.map((config) => {
+    const results = allResults[config.id] || [];
+    const overalls = extract(results, "overallScore");
+    return {
+      config,
+      label: llmLabel(config),
+      count: results.length,
+      bajo: overalls.filter((v) => v < 40).length,
+      medio: overalls.filter((v) => v >= 40 && v < 70).length,
+      alto: overalls.filter((v) => v >= 70).length,
+      dims: Object.fromEntries(
+        DIMS.map((d) => {
+          const vals = extract(results, d.field);
+          return [
+            d.field,
+            {
+              avg: avg(vals),
+              median: median(vals),
+              min: minVal(vals),
+              max: maxVal(vals),
+              stdDev: stdDev(vals),
+              passRate: passRate(vals),
+            },
+          ];
+        })
+      ) as EvaluatorStats["dims"],
+    };
+  });
+}
+
 function generatePanoramaGeneralSection(
   configs: LLMConfig[],
   allResults: Record<string, EvaluationResult[]>,
-  consistency: QuestionConsistency[] | null
+  panoramaImages: TexImageAsset[]
 ): string {
   let tex = `\\section{Panorama General}\n\n`;
+  const evaluatorStats = buildEvaluatorStats(configs, allResults);
 
   const totalQ = configs.length > 0 ? (allResults[configs[0].id] || []).length : 0;
   tex += `Se evaluaron \\textbf{${totalQ} preguntas} utilizando \\textbf{${configs.length} evaluador${configs.length !== 1 ? "es" : ""}} LLM.\n\n`;
+
+  if (panoramaImages.length > 0) {
+    tex += `\\subsection{Visuales del Panorama General}\n\n`;
+    tex += `Las gráficas del panorama general se integran como capturas para mantener fidelidad visual.\n\n`;
+    for (const image of panoramaImages) {
+      tex += `\\begin{figure}[htbp]\n`;
+      tex += `\\centering\n`;
+      tex += `\\includegraphics[width=\\textwidth]{${escapeTex(image.filename)}}\n`;
+      tex += `\\caption{${escapeTex(image.caption)}}\n`;
+      tex += `\\end{figure}\n\n`;
+    }
+  }
 
   tex += `\\subsection{Comparación de evaluadores}\n\n`;
   tex += `\\renewcommand{\\arraystretch}{1.3}\n`;
@@ -267,15 +353,14 @@ function generatePanoramaGeneralSection(
   tex += ` & \\textcolor{profublue}{\\textbf{\\% Aprob.}} \\\\\n`;
   tex += `\\midrule\n`;
 
-  for (const config of configs) {
-    const results = allResults[config.id] || [];
-    const label = escapeTex(llmLabel(config));
+  for (const ev of evaluatorStats) {
+    const label = escapeTex(ev.label);
     const metrics = [
-      { name: "Promedio", fn: (f: ScoreField) => avg(extract(results, f)) },
-      { name: "Mediana", fn: (f: ScoreField) => median(extract(results, f)) },
-      { name: "Mín", fn: (f: ScoreField) => minVal(extract(results, f)) },
-      { name: "Máx", fn: (f: ScoreField) => maxVal(extract(results, f)) },
-      { name: "Desv.\\,Est.", fn: (f: ScoreField) => stdDev(extract(results, f)) },
+      { name: "Promedio", fn: (f: ScoreField) => ev.dims[f].avg },
+      { name: "Mediana", fn: (f: ScoreField) => ev.dims[f].median },
+      { name: "Mín", fn: (f: ScoreField) => ev.dims[f].min },
+      { name: "Máx", fn: (f: ScoreField) => ev.dims[f].max },
+      { name: "Desv.\\,Est.", fn: (f: ScoreField) => ev.dims[f].stdDev },
     ];
 
     for (let mi = 0; mi < metrics.length; mi++) {
@@ -290,7 +375,7 @@ function generatePanoramaGeneralSection(
         tex += cmd ? ` & ${cmd}{${v}}` : ` & ${v}`;
       }
       if (mi === 0) {
-        const pr = passRate(extract(results, "overallScore"));
+        const pr = ev.dims.overallScore.passRate;
         const prCmd = pr >= 70 ? "\\textcolor{profgreen}" : pr >= 40 ? "\\textcolor{profyellow}" : "\\textcolor{profred}";
         tex += ` & ${prCmd}{${pr}\\%}`;
       } else {
@@ -304,22 +389,99 @@ function generatePanoramaGeneralSection(
   tex += `\\end{tabularx}\n`;
   tex += `}\n\n`;
 
+  tex += `\\subsection{Distribución de puntaje general}\n\n`;
+  tex += `\\renewcommand{\\arraystretch}{1.2}\n`;
+  tex += `{\\footnotesize\n`;
+  tex += `\\begin{tabularx}{\\textwidth}{l c c c c}\n`;
+  tex += `\\toprule\n`;
+  tex += `\\textcolor{profublue}{\\textbf{Evaluador}} & \\textcolor{profred}{\\textbf{Bajo (<40)}} & \\textcolor{profyellow}{\\textbf{Medio (40--69)}} & \\textcolor{profgreen}{\\textbf{Alto (\\geq 70)}} & \\textcolor{profublue}{\\textbf{Total}} \\\\\n`;
+  tex += `\\midrule\n`;
+  for (const ev of evaluatorStats) {
+    tex += `${escapeTex(ev.label)} & \\textcolor{profred}{${ev.bajo}} & \\textcolor{profyellow}{${ev.medio}} & \\textcolor{profgreen}{${ev.alto}} & ${ev.count} \\\\\n`;
+  }
+  tex += `\\bottomrule\n`;
+  tex += `\\end{tabularx}\n`;
+  tex += `}\n\n`;
+
+  return tex;
+}
+
+function formatInlineMetaToTex(line: string): string {
+  const escaped = escapeTex(line);
+  return escaped.replace(/\*\*([^*]+)\*\*/g, "\\\\textbf{$1}");
+}
+
+function renderMetaAnalysisText(metaAnalysis: string): string {
+  const lines = metaAnalysis.split(/\r?\n/);
+  let tex = "";
+  let listOpen = false;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) {
+      if (listOpen) {
+        tex += `\\end{itemize}\n`;
+        listOpen = false;
+      }
+      tex += `\\vspace{0.2em}\n`;
+      continue;
+    }
+    if (line.startsWith("## ")) {
+      if (listOpen) {
+        tex += `\\end{itemize}\n`;
+        listOpen = false;
+      }
+      tex += `\\noindent{\\large\\textcolor{profublue}{\\textbf{${formatInlineMetaToTex(line.replace(/^##\s*/, ""))}}}}\\\\[0.3em]\n`;
+      continue;
+    }
+    if (line.startsWith("# ")) {
+      if (listOpen) {
+        tex += `\\end{itemize}\n`;
+        listOpen = false;
+      }
+      tex += `\\noindent{\\Large\\textcolor{profublue}{\\textbf{${formatInlineMetaToTex(line.replace(/^#\s*/, ""))}}}}\\\\[0.4em]\n`;
+      continue;
+    }
+    if (line.startsWith("- ") || line.startsWith("• ")) {
+      if (!listOpen) {
+        tex += `\\begin{itemize}\n`;
+        listOpen = true;
+      }
+      tex += `\\item \\textcolor{black!80}{${formatInlineMetaToTex(line.replace(/^[-•]\s*/, ""))}}\n`;
+      continue;
+    }
+    if (listOpen) {
+      tex += `\\end{itemize}\n`;
+      listOpen = false;
+    }
+    tex += `\\noindent\\textcolor{black!80}{${formatInlineMetaToTex(line)}}\\\\\n`;
+  }
+  if (listOpen) {
+    tex += `\\end{itemize}\n`;
+  }
+  return tex;
+}
+
+function generateMetaEvaluationSection(
+  consistency: QuestionConsistency[] | null,
+  metaAnalysis: string | null
+): string {
+  if ((!consistency || consistency.length === 0) && !metaAnalysis?.trim()) {
+    return "";
+  }
+  let tex = `\\section{Análisis Meta-evaluador}\n\n`;
+
+  if (metaAnalysis?.trim()) {
+    tex += `\\subsection{Análisis integral}\n\n`;
+    tex += renderMetaAnalysisText(metaAnalysis);
+    tex += `\n`;
+  }
+
   if (consistency && consistency.length > 0) {
-    tex += `\\subsection{Consistencia entre evaluadores (Desviación estándar)}\n\n`;
+    tex += `\\subsection{Consistencia entre evaluadores}\n\n`;
     tex += `Para cada pregunta se calculó la desviación estándar de las calificaciones otorgadas por los distintos evaluadores en cada dimensión. Valores bajos indican mayor acuerdo entre evaluadores.\n\n`;
 
-    const stdDevDims: { label: string; field: keyof QuestionConsistency }[] = [
-      { label: "Precisión", field: "accuracyStdDev" },
-      { label: "Completitud", field: "completenessStdDev" },
-      { label: "Relevancia", field: "relevanceStdDev" },
-      { label: "Coherencia", field: "coherenceStdDev" },
-      { label: "Claridad", field: "clarityStdDev" },
-      { label: "Utilidad", field: "usefulnessStdDev" },
-      { label: "General", field: "overallStdDev" },
-    ];
-
     tex += `\\textbf{Promedios de desviación estándar:} `;
-    tex += stdDevDims.map((d) => {
+    tex += STD_DEV_DIMS.map((d) => {
       const v = avg(consistency.map((c) => c[d.field] as number));
       return `${d.label}~=~${stdDevColorCmd(v)}{${v}}`;
     }).join(", ");
@@ -327,10 +489,10 @@ function generatePanoramaGeneralSection(
 
     tex += `\\renewcommand{\\arraystretch}{1.2}\n`;
     tex += `{\\scriptsize\n`;
-    tex += `\\begin{longtable}{r p{5cm} ${"c ".repeat(stdDevDims.length).trim()}}\n`;
+    tex += `\\begin{longtable}{r p{5cm} ${"c ".repeat(STD_DEV_DIMS.length).trim()}}\n`;
     tex += `\\toprule\n`;
     tex += `\\textcolor{profublue}{\\textbf{\\#}} & \\textcolor{profublue}{\\textbf{Pregunta}}`;
-    for (const d of stdDevDims) {
+    for (const d of STD_DEV_DIMS) {
       tex += ` & \\textcolor{profublue}{\\textbf{$\\sigma$ ${d.label.slice(0, 4)}}}`;
     }
     tex += ` \\\\\n`;
@@ -338,7 +500,7 @@ function generatePanoramaGeneralSection(
     tex += `\\endfirsthead\n`;
     tex += `\\toprule\n`;
     tex += `\\textcolor{profublue}{\\textbf{\\#}} & \\textcolor{profublue}{\\textbf{Pregunta}}`;
-    for (const d of stdDevDims) {
+    for (const d of STD_DEV_DIMS) {
       tex += ` & \\textcolor{profublue}{\\textbf{$\\sigma$ ${d.label.slice(0, 4)}}}`;
     }
     tex += ` \\\\\n`;
@@ -348,7 +510,7 @@ function generatePanoramaGeneralSection(
     for (const c of consistency) {
       const q = escapeTex(c.question.length > 50 ? c.question.slice(0, 50) + "..." : c.question);
       tex += `${c.questionIndex + 1} & ${q}`;
-      for (const d of stdDevDims) {
+      for (const d of STD_DEV_DIMS) {
         const v = c[d.field] as number;
         tex += ` & ${stdDevColorCmd(v)}{${v}}`;
       }
@@ -479,10 +641,20 @@ export interface TexReportParams {
   rows: EvaluationRow[];
   allResults: Record<string, EvaluationResult[]>;
   consistency: QuestionConsistency[] | null;
+  metaAnalysis?: string | null;
+  panoramaImages?: TexImageAsset[];
 }
 
 export function generateFullTexReport(params: TexReportParams): string {
-  const { reportContext, configs, rows, allResults, consistency } = params;
+  const {
+    reportContext,
+    configs,
+    rows,
+    allResults,
+    consistency,
+    metaAnalysis = null,
+    panoramaImages = [],
+  } = params;
   const evaluationDate = new Date();
   const headerText = `Evaluación del agente: ${reportContext.agentName} | ${reportContext.evaluatorName}`;
 
@@ -497,9 +669,14 @@ export function generateFullTexReport(params: TexReportParams): string {
   tex += generateAgentConfigurationSection(reportContext);
   tex += `\\newpage\n`;
 
-  tex += generatePanoramaGeneralSection(configs, allResults, consistency);
-
+  tex += generatePanoramaGeneralSection(configs, allResults, panoramaImages);
   tex += `\\newpage\n`;
+
+  const metaSection = generateMetaEvaluationSection(consistency, metaAnalysis);
+  if (metaSection.trim()) {
+    tex += metaSection;
+    tex += `\\newpage\n`;
+  }
 
   for (const config of configs) {
     const results = allResults[config.id] || [];
@@ -519,13 +696,31 @@ export function generateFullTexReport(params: TexReportParams): string {
 
 export function downloadTexFile(params: TexReportParams) {
   const content = generateFullTexReport(params);
-  const blob = new Blob([content], { type: "application/x-tex;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `evaluacion_agente_${formatDateES(new Date()).replace(/ /g, "_")}.tex`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  const zip = new JSZip();
+  const baseName = `evaluacion_agente_${formatDateES(new Date()).replace(/ /g, "_")}`;
+  zip.file(`${baseName}.tex`, content);
+
+  const images = params.panoramaImages || [];
+  if (images.length > 0) {
+    const assets = zip.folder("assets");
+    if (assets) {
+      for (const image of images) {
+        const base64 = image.dataUrl.includes(",")
+          ? image.dataUrl.split(",")[1]
+          : image.dataUrl;
+        assets.file(image.filename, base64, { base64: true });
+      }
+    }
+  }
+
+  zip.generateAsync({ type: "blob" }).then((blob) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${baseName}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
 }

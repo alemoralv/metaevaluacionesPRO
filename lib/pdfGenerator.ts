@@ -70,6 +70,38 @@ function avg(results: EvaluationResult[], field: ScoreField): number {
   return Math.round((results.reduce((s, r) => s + r[field], 0) / results.length) * 10) / 10;
 }
 
+function extract(results: EvaluationResult[], field: ScoreField): number[] {
+  return results.map((r) => r[field]);
+}
+
+function median(vals: number[]): number {
+  if (vals.length === 0) return 0;
+  const sorted = [...vals].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const raw = sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  return Math.round(raw * 10) / 10;
+}
+
+function minVal(vals: number[]): number {
+  return vals.length === 0 ? 0 : Math.min(...vals);
+}
+
+function maxVal(vals: number[]): number {
+  return vals.length === 0 ? 0 : Math.max(...vals);
+}
+
+function stdDev(vals: number[]): number {
+  if (vals.length < 2) return 0;
+  const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
+  const variance = vals.reduce((s, v) => s + (v - mean) ** 2, 0) / vals.length;
+  return Math.round(Math.sqrt(variance) * 100) / 100;
+}
+
+function passRate(vals: number[]): number {
+  if (vals.length === 0) return 0;
+  return Math.round((vals.filter((v) => v >= 70).length / vals.length) * 1000) / 10;
+}
+
 function ensureSpace(doc: jsPDF, needed: number, y: number): number {
   if (y + needed > PAGE_H - MARGIN_B) {
     doc.addPage();
@@ -316,12 +348,17 @@ function addAgentContextSection(
     const trimmed = reportContext.systemInstructions.length > 2500
       ? `${reportContext.systemInstructions.slice(0, 2500)}...`
       : reportContext.systemInstructions;
-    const instructionLines = doc.splitTextToSize(trimmed, CONTENT_W - 4);
-    y = ensureSpace(doc, instructionLines.length * 3.8 + 8, y);
-    doc.setDrawColor(220, 220, 220);
-    doc.roundedRect(MARGIN_L, y - 3.5, CONTENT_W, instructionLines.length * 3.8 + 5, 1.5, 1.5, "S");
-    doc.text(instructionLines, MARGIN_L + 2, y);
-    y += instructionLines.length * 3.8 + 6;
+    const instructionBlocks = trimmed
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+    for (const block of instructionBlocks) {
+      const blockLines = doc.splitTextToSize(block, CONTENT_W - 2);
+      y = ensureSpace(doc, blockLines.length * 3.8 + 4, y);
+      doc.text(blockLines, MARGIN_L, y);
+      y += blockLines.length * 3.8 + 1.8;
+    }
+    y += 2;
   }
 
   return y + 4;
@@ -449,6 +486,211 @@ async function addCapturedFullPageSection(
     doc.text(captureErrorMessage, MARGIN_L, y);
     return y + 8;
   }
+}
+
+interface EvaluatorStats {
+  label: string;
+  count: number;
+  bajo: number;
+  medio: number;
+  alto: number;
+  dims: Record<
+    ScoreField,
+    { avg: number; median: number; min: number; max: number; stdDev: number; passRate: number }
+  >;
+}
+
+function buildEvaluatorStats(
+  configs: LLMConfig[],
+  allResults: Record<string, EvaluationResult[]>
+): EvaluatorStats[] {
+  return configs.map((config) => {
+    const results = allResults[config.id] || [];
+    const overalls = extract(results, "overallScore");
+    return {
+      label: `${config.model} (T=${config.temperature})`,
+      count: results.length,
+      bajo: overalls.filter((v) => v < 40).length,
+      medio: overalls.filter((v) => v >= 40 && v < 70).length,
+      alto: overalls.filter((v) => v >= 70).length,
+      dims: Object.fromEntries(
+        DIMS.map((d) => {
+          const vals = extract(results, d.field);
+          return [
+            d.field,
+            {
+              avg: avg(results, d.field),
+              median: median(vals),
+              min: minVal(vals),
+              max: maxVal(vals),
+              stdDev: stdDev(vals),
+              passRate: passRate(vals),
+            },
+          ];
+        })
+      ) as EvaluatorStats["dims"],
+    };
+  });
+}
+
+function drawDetailedStatsHeader(doc: jsPDF, y: number): number {
+  const headerH = 7;
+  const colWidths = [34, 15, 11, 11, 11, 11, 11, 11, 11, 12];
+  const headers = ["Eval", "Métrica", "Prec", "Comp", "Rel", "Coh", "Clar", "Util", "Gral", "%Aprob"];
+  doc.setFillColor(...BLUE);
+  doc.rect(MARGIN_L, y - 5, CONTENT_W, headerH, "F");
+  doc.setFontSize(7);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...WHITE);
+  let x = MARGIN_L + 1.5;
+  headers.forEach((h, i) => {
+    doc.text(h, x, y);
+    x += colWidths[i];
+  });
+  return y + headerH - 1;
+}
+
+function addPanoramaTablesSection(
+  doc: jsPDF,
+  configs: LLMConfig[],
+  allResults: Record<string, EvaluationResult[]>
+): number {
+  const evaluatorStats = buildEvaluatorStats(configs, allResults);
+  doc.addPage();
+  let y = MARGIN_T + 8;
+  y = addSectionTitle(doc, "Panorama General", y);
+  y = addSubsectionTitle(doc, "Estadísticas detalladas por evaluador", y);
+  y = drawDetailedStatsHeader(doc, y);
+
+  const rows = [
+    { key: "Promedio", fn: (ev: EvaluatorStats, field: ScoreField) => ev.dims[field].avg, isStdDev: false },
+    { key: "Mediana", fn: (ev: EvaluatorStats, field: ScoreField) => ev.dims[field].median, isStdDev: false },
+    { key: "Mín", fn: (ev: EvaluatorStats, field: ScoreField) => ev.dims[field].min, isStdDev: false },
+    { key: "Máx", fn: (ev: EvaluatorStats, field: ScoreField) => ev.dims[field].max, isStdDev: false },
+    { key: "Desv.", fn: (ev: EvaluatorStats, field: ScoreField) => ev.dims[field].stdDev, isStdDev: true },
+  ];
+  const rowH = 6.5;
+  const colWidths = [34, 15, 11, 11, 11, 11, 11, 11, 11, 12];
+
+  evaluatorStats.forEach((ev, evIdx) => {
+    rows.forEach((row, rowIdx) => {
+      if (y + rowH > PAGE_H - MARGIN_B) {
+        doc.addPage();
+        addHeaderFooter(doc);
+        y = MARGIN_T + 8;
+        y = addSubsectionTitle(doc, "Estadísticas detalladas por evaluador (cont.)", y);
+        y = drawDetailedStatsHeader(doc, y);
+      }
+      if ((evIdx + rowIdx) % 2 === 0) {
+        doc.setFillColor(245, 247, 250);
+        doc.rect(MARGIN_L, y - 4.5, CONTENT_W, rowH, "F");
+      }
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(...DARK);
+      let x = MARGIN_L + 1.5;
+
+      const evalText = rowIdx === 0 ? (ev.label.length > 28 ? `${ev.label.slice(0, 28)}...` : ev.label) : "";
+      doc.text(evalText, x, y);
+      x += colWidths[0];
+
+      doc.text(row.key, x, y);
+      x += colWidths[1];
+
+      DIMS.forEach((d, i) => {
+        const value = row.fn(ev, d.field);
+        if (!row.isStdDev) {
+          doc.setTextColor(...scoreColor(value));
+          doc.setFont("helvetica", "bold");
+        } else {
+          doc.setTextColor(...DARK);
+          doc.setFont("helvetica", "normal");
+        }
+        doc.text(String(value), x + 2.5, y);
+        x += colWidths[i + 2];
+      });
+
+      const pr = rowIdx === 0 ? `${ev.dims.overallScore.passRate}%` : "";
+      if (rowIdx === 0) {
+        doc.setTextColor(...scoreColor(ev.dims.overallScore.passRate));
+        doc.setFont("helvetica", "bold");
+      } else {
+        doc.setTextColor(...DARK);
+        doc.setFont("helvetica", "normal");
+      }
+      doc.text(pr, x + 1, y);
+      y += rowH;
+    });
+  });
+
+  y += 4;
+  y = addSubsectionTitle(doc, "Distribución de puntaje general", y);
+  const distHeaderH = 7;
+  const distRowH = 7;
+  const distColW = [72, 20, 22, 20, 16];
+  const distHeaders = ["Evaluador", "Bajo", "Medio", "Alto", "Total"];
+  if (y + distHeaderH > PAGE_H - MARGIN_B) {
+    doc.addPage();
+    addHeaderFooter(doc);
+    y = MARGIN_T + 8;
+    y = addSubsectionTitle(doc, "Distribución de puntaje general (cont.)", y);
+  }
+  doc.setFillColor(...BLUE);
+  doc.rect(MARGIN_L, y - 5, CONTENT_W, distHeaderH, "F");
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...WHITE);
+  let x = MARGIN_L + 2;
+  distHeaders.forEach((h, i) => {
+    doc.text(h, x, y);
+    x += distColW[i];
+  });
+  y += distHeaderH - 1;
+  evaluatorStats.forEach((ev, i) => {
+    if (y + distRowH > PAGE_H - MARGIN_B) {
+      doc.addPage();
+      addHeaderFooter(doc);
+      y = MARGIN_T + 8;
+      y = addSubsectionTitle(doc, "Distribución de puntaje general (cont.)", y);
+      doc.setFillColor(...BLUE);
+      doc.rect(MARGIN_L, y - 5, CONTENT_W, distHeaderH, "F");
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(...WHITE);
+      let hx = MARGIN_L + 2;
+      distHeaders.forEach((h, idx) => {
+        doc.text(h, hx, y);
+        hx += distColW[idx];
+      });
+      y += distHeaderH - 1;
+    }
+    if (i % 2 === 0) {
+      doc.setFillColor(245, 247, 250);
+      doc.rect(MARGIN_L, y - 4.5, CONTENT_W, distRowH, "F");
+    }
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...DARK);
+    let dx = MARGIN_L + 2;
+    const lbl = ev.label.length > 50 ? `${ev.label.slice(0, 50)}...` : ev.label;
+    doc.text(lbl, dx, y);
+    dx += distColW[0];
+    doc.setTextColor(...RED);
+    doc.setFont("helvetica", "bold");
+    doc.text(String(ev.bajo), dx + 6, y);
+    dx += distColW[1];
+    doc.setTextColor(...YELLOW_SCORE);
+    doc.text(String(ev.medio), dx + 7, y);
+    dx += distColW[2];
+    doc.setTextColor(...GREEN);
+    doc.text(String(ev.alto), dx + 7, y);
+    dx += distColW[3];
+    doc.setTextColor(...DARK);
+    doc.setFont("helvetica", "normal");
+    doc.text(String(ev.count), dx + 5, y);
+    y += distRowH;
+  });
+  return y + 6;
 }
 
 function addConversationEntry(
@@ -717,6 +959,141 @@ function addConsistencySection(
   return y + 6;
 }
 
+function addMetaAnalysisSection(
+  doc: jsPDF,
+  consistency: QuestionConsistency[] | null,
+  metaAnalysis: string | null
+): number {
+  doc.addPage();
+  addHeaderFooter(doc, "Meta-evaluador");
+  let y = MARGIN_T + 8;
+  y = addSectionTitle(doc, "Análisis Meta-evaluador", y);
+
+  if (metaAnalysis?.trim()) {
+    y = addSubsectionTitle(doc, "Análisis integral", y);
+    const lines = metaAnalysis.split(/\r?\n/);
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line) {
+        y += 2;
+        continue;
+      }
+      if (line.startsWith("## ")) {
+        y = ensureSpace(doc, 8, y);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.setTextColor(...BLUE);
+        doc.text(line.replace(/^##\s*/, "").replace(/\*\*/g, ""), MARGIN_L, y);
+        y += 6;
+        continue;
+      }
+      if (line.startsWith("# ")) {
+        y = ensureSpace(doc, 9, y);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(12);
+        doc.setTextColor(...BLUE);
+        doc.text(line.replace(/^#\s*/, "").replace(/\*\*/g, ""), MARGIN_L, y);
+        y += 7;
+        continue;
+      }
+      const isBullet = line.startsWith("- ") || line.startsWith("• ");
+      const clean = line.replace(/^[-•]\s*/, "").replace(/\*\*/g, "");
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(...DARK);
+      const wrapped = doc.splitTextToSize(isBullet ? `- ${clean}` : clean, CONTENT_W);
+      y = ensureSpace(doc, wrapped.length * 4 + 2, y);
+      doc.text(wrapped, MARGIN_L, y);
+      y += wrapped.length * 4 + 1;
+    }
+  }
+
+  if (consistency && consistency.length > 0) {
+    y += 3;
+    y = ensureSpace(doc, 12, y);
+    y = addSubsectionTitle(doc, "Consistencia entre evaluadores", y);
+    const intro = doc.splitTextToSize(
+      "Para cada pregunta se calculó la desviación estándar por dimensión. Valores bajos indican mayor acuerdo entre evaluadores.",
+      CONTENT_W
+    );
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...DARK);
+    y = ensureSpace(doc, intro.length * 4 + 3, y);
+    doc.text(intro, MARGIN_L, y);
+    y += intro.length * 4 + 3;
+
+    const stdDevFields: { label: string; field: keyof QuestionConsistency }[] = [
+      { label: "σ Prec", field: "accuracyStdDev" },
+      { label: "σ Comp", field: "completenessStdDev" },
+      { label: "σ Rel", field: "relevanceStdDev" },
+      { label: "σ Coh", field: "coherenceStdDev" },
+      { label: "σ Clar", field: "clarityStdDev" },
+      { label: "σ Util", field: "usefulnessStdDev" },
+      { label: "σ Gral", field: "overallStdDev" },
+    ];
+    const colWidths = [8, 52, ...stdDevFields.map(() => 14)];
+    const headers = ["#", "Pregunta", ...stdDevFields.map((f) => f.label)];
+    const headerH = 8;
+    const rowH = 7;
+
+    const drawHeader = () => {
+      doc.setFillColor(...BLUE);
+      doc.rect(MARGIN_L, y - 5, CONTENT_W, headerH, "F");
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(...WHITE);
+      let xh = MARGIN_L + 1;
+      headers.forEach((h, i) => {
+        doc.text(h, xh, y);
+        xh += colWidths[i];
+      });
+      y += headerH - 1;
+    };
+    y = ensureSpace(doc, headerH + 3, y);
+    drawHeader();
+
+    for (let idx = 0; idx < consistency.length; idx++) {
+      const c = consistency[idx];
+      if (y + rowH > PAGE_H - MARGIN_B) {
+        doc.addPage();
+        addHeaderFooter(doc);
+        y = MARGIN_T + 8;
+        y = addSubsectionTitle(doc, "Consistencia entre evaluadores (cont.)", y);
+        drawHeader();
+      }
+      if (idx % 2 === 0) {
+        doc.setFillColor(245, 247, 250);
+        doc.rect(MARGIN_L, y - 4.5, CONTENT_W, rowH, "F");
+      }
+
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(...DARK);
+
+      let x = MARGIN_L + 1;
+      doc.text(String(c.questionIndex + 1), x, y);
+      x += colWidths[0];
+
+      const truncQ = c.question.length > 40 ? c.question.slice(0, 40) + "..." : c.question;
+      doc.text(truncQ, x, y);
+      x += colWidths[1];
+
+      stdDevFields.forEach((sf, vi) => {
+        const v = c[sf.field] as number;
+        const color = stdDevPdfColor(v);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(...color);
+        doc.text(String(v), x, y);
+        x += colWidths[vi + 2];
+      });
+      y += rowH;
+    }
+  }
+
+  return y + 6;
+}
+
 function addEndRule(doc: jsPDF, y: number) {
   y = ensureSpace(doc, 16, y);
   doc.setDrawColor(...GOLD);
@@ -779,10 +1156,10 @@ export interface AllPdfParams {
   rows: EvaluationRow[];
   allResults: Record<string, EvaluationResult[]>;
   chartsContainers: Record<string, HTMLDivElement | null>;
-  overviewContainer: HTMLDivElement | null;
-  metaContainer: HTMLDivElement | null;
+  overviewChartsContainer: HTMLDivElement | null;
   includeMetaSection: boolean;
   consistency: QuestionConsistency[] | null;
+  metaAnalysis: string | null;
 }
 
 export async function generateAllEvaluatorsPdf(params: AllPdfParams) {
@@ -791,10 +1168,10 @@ export async function generateAllEvaluatorsPdf(params: AllPdfParams) {
     rows,
     allResults,
     chartsContainers,
-    overviewContainer,
-    metaContainer,
+    overviewChartsContainer,
     includeMetaSection,
     consistency,
+    metaAnalysis,
     reportContext,
   } = params;
   const evaluationDate = new Date();
@@ -810,19 +1187,14 @@ export async function generateAllEvaluatorsPdf(params: AllPdfParams) {
 
   y = await addCapturedFullPageSection(
     doc,
-    "Panorama General",
-    overviewContainer,
-    "[No se pudo capturar el Panorama General]"
+    "Panorama General - Gráficas",
+    overviewChartsContainer,
+    "[No se pudo capturar el panorama de gráficas]"
   );
 
-  if (includeMetaSection) {
-    y = await addCapturedFullPageSection(
-      doc,
-      "Análisis Meta-evaluador",
-      metaContainer,
-      "[No se pudo capturar el Análisis Meta-evaluador]"
-    );
-  }
+  y = addPanoramaTablesSection(doc, configs, allResults);
+
+  if (includeMetaSection) y = addMetaAnalysisSection(doc, consistency, metaAnalysis);
 
   for (const config of configs) {
     const results = allResults[config.id] || [];
@@ -836,10 +1208,6 @@ export async function generateAllEvaluatorsPdf(params: AllPdfParams) {
     y = addScoreSummary(doc, results, y);
     y = await addChartsSection(doc, container, y);
     y = addConversationSection(doc, rows, results, label, y);
-  }
-
-  if (consistency && consistency.length > 0) {
-    y = addConsistencySection(doc, consistency, y);
   }
 
   addEndRule(doc, y);
