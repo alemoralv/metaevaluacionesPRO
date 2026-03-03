@@ -5,6 +5,7 @@ import { QuestionConsistency } from "@/lib/types";
 interface MetaEvaluationPanelProps {
   consistency: QuestionConsistency[];
   metaAnalysis: string | null;
+  recommendations: string[];
   metaAnalyzing: boolean;
 }
 
@@ -80,6 +81,7 @@ const STD_DEV_DIMS: { label: string; field: keyof QuestionConsistency }[] = [
 export default function MetaEvaluationPanel({
   consistency,
   metaAnalysis,
+  recommendations,
   metaAnalyzing,
 }: MetaEvaluationPanelProps) {
   const avgOf = (field: keyof QuestionConsistency) => {
@@ -186,6 +188,29 @@ export default function MetaEvaluationPanel({
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
+        <div className="px-5 pt-5 pb-2">
+          <h4 className="text-sm font-semibold text-[#165185] uppercase tracking-wide">
+            Recomendaciones
+          </h4>
+        </div>
+        <div className="px-5 pb-5">
+          {recommendations.length > 0 ? (
+            <ul className="space-y-2">
+              {recommendations.map((recommendation, idx) => (
+                <li key={idx} className="text-sm text-gray-700 leading-relaxed">
+                  {idx + 1}. {renderBold(recommendation)}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-gray-400 py-2">
+              No se generaron recomendaciones.
+            </p>
+          )}
         </div>
       </div>
     </div>

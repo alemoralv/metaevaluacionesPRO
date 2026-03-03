@@ -144,6 +144,7 @@ export default function Home() {
     null
   );
   const [metaAnalysis, setMetaAnalysis] = useState<string | null>(null);
+  const [metaRecommendations, setMetaRecommendations] = useState<string[]>([]);
   const [metaAnalyzing, setMetaAnalyzing] = useState(false);
 
   const [error, setError] = useState("");
@@ -190,6 +191,7 @@ export default function Home() {
     setCompletedLlms(new Set());
     setConsistency(null);
     setMetaAnalysis(null);
+    setMetaRecommendations([]);
     setError("");
     setState("configure");
   };
@@ -321,6 +323,7 @@ export default function Home() {
     setCompletedLlms(new Set());
     setConsistency(null);
     setMetaAnalysis(null);
+    setMetaRecommendations([]);
     setMetaAnalyzing(false);
     setError("");
     setState("evaluating");
@@ -369,7 +372,12 @@ export default function Home() {
 
         if (response.ok) {
           const data = await response.json();
-          setMetaAnalysis(data.analysis);
+          setMetaAnalysis(data.analysis ?? null);
+          setMetaRecommendations(
+            Array.isArray(data.recommendations)
+              ? data.recommendations.map((item: unknown) => String(item)).filter(Boolean)
+              : []
+          );
         }
       } catch {
         // meta-analysis is optional; don't block results
@@ -422,6 +430,7 @@ export default function Home() {
         includeMetaSection: Boolean(metaEnabled && consistency),
         consistency,
         metaAnalysis,
+        recommendations: metaRecommendations,
       });
     } finally {
       setPdfGenerating(false);
@@ -458,6 +467,7 @@ export default function Home() {
         allResults,
         consistency,
         metaAnalysis,
+        recommendations: metaRecommendations,
         panoramaImages,
       });
     } finally {
@@ -472,6 +482,7 @@ export default function Home() {
     setCompletedLlms(new Set());
     setConsistency(null);
     setMetaAnalysis(null);
+    setMetaRecommendations([]);
     setError("");
     setState("upload");
   };
@@ -788,6 +799,7 @@ export default function Home() {
                       <MetaEvaluationPanel
                         consistency={consistency}
                         metaAnalysis={metaAnalysis}
+                        recommendations={metaRecommendations}
                         metaAnalyzing={metaAnalyzing}
                       />
                     </div>
@@ -839,6 +851,7 @@ export default function Home() {
                   <MetaEvaluationPanel
                     consistency={consistency}
                     metaAnalysis={metaAnalysis}
+                    recommendations={metaRecommendations}
                     metaAnalyzing={metaAnalyzing}
                   />
                 </div>

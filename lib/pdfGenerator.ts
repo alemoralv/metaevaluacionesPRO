@@ -53,6 +53,27 @@ function boolToYesNo(value: boolean): string {
   return value ? "si" : "no";
 }
 
+function normalizeReportText(input: string): string {
+  if (!input) return "";
+  let text = input
+    .replace(/\r\n/g, "\n")
+    .replace(/\u00A0/g, " ")
+    .replace(/\u200B/g, "")
+    .replace(/\uFEFF/g, "");
+
+  const replacements: Array<[string, string]> = [
+    ["Ã¡", "á"], ["Ã©", "é"], ["Ã­", "í"], ["Ã³", "ó"], ["Ãº", "ú"],
+    ["Ã", "Á"], ["Ã‰", "É"], ["Ã", "Í"], ["Ã“", "Ó"], ["Ãš", "Ú"],
+    ["Ã±", "ñ"], ["Ã‘", "Ñ"], ["Ã¼", "ü"], ["Ãœ", "Ü"],
+    ["Â¿", "¿"], ["Â¡", "¡"], ["Â", ""],
+    ["â€“", "-"], ["â€”", "-"], ["â€œ", "\""], ["â€\u009d", "\""], ["â€™", "'"],
+  ];
+  for (const [broken, fixed] of replacements) {
+    text = text.split(broken).join(fixed);
+  }
+  return text;
+}
+
 function scoreColor(score: number): [number, number, number] {
   if (score >= 70) return GREEN;
   if (score >= 40) return YELLOW_SCORE;
@@ -712,7 +733,8 @@ function addConversationEntry(
   doc.setFont("helvetica", "normal");
   doc.setTextColor(...DARK);
   doc.setFontSize(9);
-  const qLines = doc.splitTextToSize(row.question, CONTENT_W - 8);
+  const normalizedQuestion = normalizeReportText(row.question);
+  const qLines = doc.splitTextToSize(normalizedQuestion, CONTENT_W - 8);
   const qBoxH = Math.max(qLines.length * 4.2 + 6, 12);
 
   y = ensureSpace(doc, qBoxH + 4, y);
@@ -732,9 +754,10 @@ function addConversationEntry(
   doc.setFont("helvetica", "normal");
   doc.setTextColor(...DARK);
   doc.setFontSize(8);
-  const truncatedResponse = row.actualResponse.length > 600
-    ? row.actualResponse.slice(0, 600) + "..."
-    : row.actualResponse;
+  const normalizedActualResponse = normalizeReportText(row.actualResponse);
+  const truncatedResponse = normalizedActualResponse.length > 600
+    ? normalizedActualResponse.slice(0, 600) + "..."
+    : normalizedActualResponse;
   const aLines = doc.splitTextToSize(truncatedResponse, CONTENT_W - 8);
   const aBoxH = Math.max(aLines.length * 3.8 + 6, 12);
 
@@ -754,10 +777,11 @@ function addConversationEntry(
 
   doc.setFont("helvetica", "italic");
   doc.setTextColor(...GRAY);
+  const normalizedExpectedResponse = normalizeReportText(row.expectedResponse);
   const eLines = doc.splitTextToSize(
-    row.expectedResponse.length > 400
-      ? row.expectedResponse.slice(0, 400) + "..."
-      : row.expectedResponse,
+    normalizedExpectedResponse.length > 400
+      ? normalizedExpectedResponse.slice(0, 400) + "..."
+      : normalizedExpectedResponse,
     CONTENT_W - 6
   );
   y = ensureSpace(doc, eLines.length * 3.5 + 2, y);
@@ -808,7 +832,7 @@ function addConversationEntry(
 
     doc.setFont("helvetica", "italic");
     doc.setTextColor(...GRAY);
-    const fLines = doc.splitTextToSize(row.feedback, CONTENT_W - 6);
+    const fLines = doc.splitTextToSize(normalizeReportText(row.feedback), CONTENT_W - 6);
     y = ensureSpace(doc, fLines.length * 3.5 + 2, y);
     doc.text(fLines, MARGIN_L + 4, y);
     y += fLines.length * 3.5 + 2;
@@ -892,13 +916,13 @@ function addConsistencySection(
   y += intro.length * 5 + 8;
 
   const stdDevFields: { label: string; field: keyof QuestionConsistency }[] = [
-    { label: "σ Prec", field: "accuracyStdDev" },
-    { label: "σ Comp", field: "completenessStdDev" },
-    { label: "σ Rel", field: "relevanceStdDev" },
-    { label: "σ Coh", field: "coherenceStdDev" },
-    { label: "σ Clar", field: "clarityStdDev" },
-    { label: "σ Util", field: "usefulnessStdDev" },
-    { label: "σ Gral", field: "overallStdDev" },
+    { label: "Std Prec", field: "accuracyStdDev" },
+    { label: "Std Comp", field: "completenessStdDev" },
+    { label: "Std Rel", field: "relevanceStdDev" },
+    { label: "Std Coh", field: "coherenceStdDev" },
+    { label: "Std Clar", field: "clarityStdDev" },
+    { label: "Std Util", field: "usefulnessStdDev" },
+    { label: "Std Gral", field: "overallStdDev" },
   ];
 
   const colWidths = [8, 52, ...stdDevFields.map(() => 14)];
@@ -938,7 +962,8 @@ function addConsistencySection(
     doc.text(String(c.questionIndex + 1), x, y);
     x += colWidths[0];
 
-    const truncQ = c.question.length > 40 ? c.question.slice(0, 40) + "..." : c.question;
+    const safeQuestion = normalizeReportText(c.question);
+    const truncQ = safeQuestion.length > 38 ? safeQuestion.slice(0, 38) + "..." : safeQuestion;
     doc.text(truncQ, x, y);
     x += colWidths[1];
 
@@ -962,7 +987,8 @@ function addConsistencySection(
 function addMetaAnalysisSection(
   doc: jsPDF,
   consistency: QuestionConsistency[] | null,
-  metaAnalysis: string | null
+  metaAnalysis: string | null,
+  recommendations: string[] | null
 ): number {
   doc.addPage();
   addHeaderFooter(doc, "Meta-evaluador");
@@ -971,7 +997,7 @@ function addMetaAnalysisSection(
 
   if (metaAnalysis?.trim()) {
     y = addSubsectionTitle(doc, "Análisis integral", y);
-    const lines = metaAnalysis.split(/\r?\n/);
+    const lines = normalizeReportText(metaAnalysis).split(/\r?\n/);
     for (const rawLine of lines) {
       const line = rawLine.trim();
       if (!line) {
@@ -1024,13 +1050,13 @@ function addMetaAnalysisSection(
     y += intro.length * 4 + 3;
 
     const stdDevFields: { label: string; field: keyof QuestionConsistency }[] = [
-      { label: "σ Prec", field: "accuracyStdDev" },
-      { label: "σ Comp", field: "completenessStdDev" },
-      { label: "σ Rel", field: "relevanceStdDev" },
-      { label: "σ Coh", field: "coherenceStdDev" },
-      { label: "σ Clar", field: "clarityStdDev" },
-      { label: "σ Util", field: "usefulnessStdDev" },
-      { label: "σ Gral", field: "overallStdDev" },
+      { label: "Std Prec", field: "accuracyStdDev" },
+      { label: "Std Comp", field: "completenessStdDev" },
+      { label: "Std Rel", field: "relevanceStdDev" },
+      { label: "Std Coh", field: "coherenceStdDev" },
+      { label: "Std Clar", field: "clarityStdDev" },
+      { label: "Std Util", field: "usefulnessStdDev" },
+      { label: "Std Gral", field: "overallStdDev" },
     ];
     const colWidths = [8, 52, ...stdDevFields.map(() => 14)];
     const headers = ["#", "Pregunta", ...stdDevFields.map((f) => f.label)];
@@ -1075,7 +1101,8 @@ function addMetaAnalysisSection(
       doc.text(String(c.questionIndex + 1), x, y);
       x += colWidths[0];
 
-      const truncQ = c.question.length > 40 ? c.question.slice(0, 40) + "..." : c.question;
+      const safeQuestion = normalizeReportText(c.question);
+      const truncQ = safeQuestion.length > 38 ? safeQuestion.slice(0, 38) + "..." : safeQuestion;
       doc.text(truncQ, x, y);
       x += colWidths[1];
 
@@ -1088,6 +1115,23 @@ function addMetaAnalysisSection(
         x += colWidths[vi + 2];
       });
       y += rowH;
+    }
+  }
+
+  if (recommendations && recommendations.length > 0) {
+    y += 3;
+    y = ensureSpace(doc, 12, y);
+    y = addSubsectionTitle(doc, "Recomendaciones", y);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...DARK);
+
+    for (let i = 0; i < recommendations.length; i++) {
+      const rec = normalizeReportText(recommendations[i]);
+      const wrapped = doc.splitTextToSize(`${i + 1}. ${rec}`, CONTENT_W);
+      y = ensureSpace(doc, wrapped.length * 4 + 2, y);
+      doc.text(wrapped, MARGIN_L, y);
+      y += wrapped.length * 4 + 1;
     }
   }
 
@@ -1160,6 +1204,7 @@ export interface AllPdfParams {
   includeMetaSection: boolean;
   consistency: QuestionConsistency[] | null;
   metaAnalysis: string | null;
+  recommendations: string[] | null;
 }
 
 export async function generateAllEvaluatorsPdf(params: AllPdfParams) {
@@ -1172,6 +1217,7 @@ export async function generateAllEvaluatorsPdf(params: AllPdfParams) {
     includeMetaSection,
     consistency,
     metaAnalysis,
+    recommendations,
     reportContext,
   } = params;
   const evaluationDate = new Date();
@@ -1194,7 +1240,7 @@ export async function generateAllEvaluatorsPdf(params: AllPdfParams) {
 
   y = addPanoramaTablesSection(doc, configs, allResults);
 
-  if (includeMetaSection) y = addMetaAnalysisSection(doc, consistency, metaAnalysis);
+  if (includeMetaSection) y = addMetaAnalysisSection(doc, consistency, metaAnalysis, recommendations);
 
   for (const config of configs) {
     const results = allResults[config.id] || [];

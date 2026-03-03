@@ -32,8 +32,29 @@ function boolToYesNo(value: boolean): string {
   return value ? "si" : "no";
 }
 
+function normalizeReportText(input: string): string {
+  if (!input) return "";
+  let text = input
+    .replace(/\r\n/g, "\n")
+    .replace(/\u00A0/g, " ")
+    .replace(/\u200B/g, "")
+    .replace(/\uFEFF/g, "");
+
+  const replacements: Array<[string, string]> = [
+    ["Ã¡", "á"], ["Ã©", "é"], ["Ã­", "í"], ["Ã³", "ó"], ["Ãº", "ú"],
+    ["Ã", "Á"], ["Ã‰", "É"], ["Ã", "Í"], ["Ã“", "Ó"], ["Ãš", "Ú"],
+    ["Ã±", "ñ"], ["Ã‘", "Ñ"], ["Ã¼", "ü"], ["Ãœ", "Ü"],
+    ["Â¿", "¿"], ["Â¡", "¡"], ["Â", ""],
+    ["â€“", "-"], ["â€”", "---"], ["â€œ", "``"], ["â€\u009d", "''"], ["â€™", "'"],
+  ];
+  for (const [broken, fixed] of replacements) {
+    text = text.split(broken).join(fixed);
+  }
+  return text;
+}
+
 function escapeTex(text: string): string {
-  return text
+  return normalizeReportText(text)
     .replace(/\\/g, "\\textbackslash{}")
     .replace(/&/g, "\\&")
     .replace(/%/g, "\\%")
@@ -342,9 +363,9 @@ function generatePanoramaGeneralSection(
   }
 
   tex += `\\subsection{Comparación de evaluadores}\n\n`;
-  tex += `\\renewcommand{\\arraystretch}{1.3}\n`;
+  tex += `\\renewcommand{\\arraystretch}{1.25}\n`;
   tex += `{\\scriptsize\n`;
-  tex += `\\begin{tabularx}{\\textwidth}{l l *{${DIMS.length}}{>{\\centering\\arraybackslash}X} >{\\centering\\arraybackslash}X}\n`;
+  tex += `\\begin{longtable}{p{2.4cm} p{1.5cm} *{${DIMS.length}}{>{\\centering\\arraybackslash}p{1.2cm}} >{\\centering\\arraybackslash}p{1.5cm}}\n`;
   tex += `\\toprule\n`;
   tex += `\\textcolor{profublue}{\\textbf{Evaluador}} & \\textcolor{profublue}{\\textbf{Métrica}}`;
   for (const d of DIMS) {
@@ -352,41 +373,49 @@ function generatePanoramaGeneralSection(
   }
   tex += ` & \\textcolor{profublue}{\\textbf{\\% Aprob.}} \\\\\n`;
   tex += `\\midrule\n`;
+  tex += `\\endfirsthead\n`;
+  tex += `\\toprule\n`;
+  tex += `\\textcolor{profublue}{\\textbf{Evaluador}} & \\textcolor{profublue}{\\textbf{Métrica}}`;
+  for (const d of DIMS) {
+    tex += ` & \\textcolor{profublue}{\\textbf{${d.label}}}`;
+  }
+  tex += ` & \\textcolor{profublue}{\\textbf{\\% Aprob.}} \\\\\n`;
+  tex += `\\midrule\n`;
+  tex += `\\endhead\n`;
 
   for (const ev of evaluatorStats) {
     const label = escapeTex(ev.label);
     const metrics = [
       { name: "Promedio", fn: (f: ScoreField) => ev.dims[f].avg },
       { name: "Mediana", fn: (f: ScoreField) => ev.dims[f].median },
-      { name: "Mín", fn: (f: ScoreField) => ev.dims[f].min },
-      { name: "Máx", fn: (f: ScoreField) => ev.dims[f].max },
-      { name: "Desv.\\,Est.", fn: (f: ScoreField) => ev.dims[f].stdDev },
+      { name: "Min", fn: (f: ScoreField) => ev.dims[f].min },
+      { name: "Max", fn: (f: ScoreField) => ev.dims[f].max },
+      { name: "Desv. Est.", fn: (f: ScoreField) => ev.dims[f].stdDev, isStd: true },
     ];
+    const pr = ev.dims.overallScore.passRate;
+    const prCmd =
+      pr >= 70
+        ? "\\textcolor{profgreen}"
+        : pr >= 40
+          ? "\\textcolor{profyellow}"
+          : "\\textcolor{profred}";
 
     for (let mi = 0; mi < metrics.length; mi++) {
       const m = metrics[mi];
-      if (mi === 0) {
-        tex += `\\multirow{${metrics.length}}{*}{\\textbf{${label}}}`;
-      }
+      tex += mi === 0 ? `\\textbf{${label}}` : ``;
       tex += ` & ${m.name}`;
       for (const d of DIMS) {
         const v = m.fn(d.field);
-        const cmd = m.name === "Desv.\\,Est." ? "" : scoreColorCmd(v);
+        const cmd = (m as { isStd?: boolean }).isStd ? "" : scoreColorCmd(v);
         tex += cmd ? ` & ${cmd}{${v}}` : ` & ${v}`;
       }
-      if (mi === 0) {
-        const pr = ev.dims.overallScore.passRate;
-        const prCmd = pr >= 70 ? "\\textcolor{profgreen}" : pr >= 40 ? "\\textcolor{profyellow}" : "\\textcolor{profred}";
-        tex += ` & ${prCmd}{${pr}\\%}`;
-      } else {
-        tex += ` &`;
-      }
+      tex += mi === 0 ? ` & ${prCmd}{${pr}\\%}` : ` &`;
       tex += ` \\\\\n`;
     }
     tex += `\\midrule\n`;
   }
   tex += `\\bottomrule\n`;
-  tex += `\\end{tabularx}\n`;
+  tex += `\\end{longtable}\n`;
   tex += `}\n\n`;
 
   tex += `\\subsection{Distribución de puntaje general}\n\n`;
@@ -463,9 +492,14 @@ function renderMetaAnalysisText(metaAnalysis: string): string {
 
 function generateMetaEvaluationSection(
   consistency: QuestionConsistency[] | null,
-  metaAnalysis: string | null
+  metaAnalysis: string | null,
+  recommendations: string[] | null
 ): string {
-  if ((!consistency || consistency.length === 0) && !metaAnalysis?.trim()) {
+  if (
+    (!consistency || consistency.length === 0) &&
+    !metaAnalysis?.trim() &&
+    (!recommendations || recommendations.length === 0)
+  ) {
     return "";
   }
   let tex = `\\section{Análisis Meta-evaluador}\n\n`;
@@ -483,7 +517,8 @@ function generateMetaEvaluationSection(
     tex += `\\textbf{Promedios de desviación estándar:} `;
     tex += STD_DEV_DIMS.map((d) => {
       const v = avg(consistency.map((c) => c[d.field] as number));
-      return `${d.label}~=~${stdDevColorCmd(v)}{${v}}`;
+      const safeLabel = d.label.replace("ó", "o");
+      return `${safeLabel}~=~${stdDevColorCmd(v)}{${v}}`;
     }).join(", ");
     tex += `\n\n`;
 
@@ -493,7 +528,7 @@ function generateMetaEvaluationSection(
     tex += `\\toprule\n`;
     tex += `\\textcolor{profublue}{\\textbf{\\#}} & \\textcolor{profublue}{\\textbf{Pregunta}}`;
     for (const d of STD_DEV_DIMS) {
-      tex += ` & \\textcolor{profublue}{\\textbf{$\\sigma$ ${d.label.slice(0, 4)}}}`;
+      tex += ` & \\textcolor{profublue}{\\textbf{Std ${escapeTex(d.label.slice(0, 4))}}}`;
     }
     tex += ` \\\\\n`;
     tex += `\\midrule\n`;
@@ -501,7 +536,7 @@ function generateMetaEvaluationSection(
     tex += `\\toprule\n`;
     tex += `\\textcolor{profublue}{\\textbf{\\#}} & \\textcolor{profublue}{\\textbf{Pregunta}}`;
     for (const d of STD_DEV_DIMS) {
-      tex += ` & \\textcolor{profublue}{\\textbf{$\\sigma$ ${d.label.slice(0, 4)}}}`;
+      tex += ` & \\textcolor{profublue}{\\textbf{Std ${escapeTex(d.label.slice(0, 4))}}}`;
     }
     tex += ` \\\\\n`;
     tex += `\\midrule\n`;
@@ -519,6 +554,15 @@ function generateMetaEvaluationSection(
     tex += `\\bottomrule\n`;
     tex += `\\end{longtable}\n`;
     tex += `}\n\n`;
+  }
+
+  if (recommendations && recommendations.length > 0) {
+    tex += `\\subsection{Recomendaciones}\n\n`;
+    tex += `\\begin{itemize}\n`;
+    for (const recommendation of recommendations) {
+      tex += `\\item ${escapeTex(recommendation)}\n`;
+    }
+    tex += `\\end{itemize}\n\n`;
   }
 
   return tex;
@@ -642,6 +686,7 @@ export interface TexReportParams {
   allResults: Record<string, EvaluationResult[]>;
   consistency: QuestionConsistency[] | null;
   metaAnalysis?: string | null;
+  recommendations?: string[] | null;
   panoramaImages?: TexImageAsset[];
 }
 
@@ -653,6 +698,7 @@ export function generateFullTexReport(params: TexReportParams): string {
     allResults,
     consistency,
     metaAnalysis = null,
+    recommendations = [],
     panoramaImages = [],
   } = params;
   const evaluationDate = new Date();
@@ -672,7 +718,7 @@ export function generateFullTexReport(params: TexReportParams): string {
   tex += generatePanoramaGeneralSection(configs, allResults, panoramaImages);
   tex += `\\newpage\n`;
 
-  const metaSection = generateMetaEvaluationSection(consistency, metaAnalysis);
+  const metaSection = generateMetaEvaluationSection(consistency, metaAnalysis, recommendations);
   if (metaSection.trim()) {
     tex += metaSection;
     tex += `\\newpage\n`;

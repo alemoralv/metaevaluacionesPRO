@@ -46,8 +46,8 @@ export async function POST(request: NextRequest) {
     : undefined;
 
   try {
-    const analysis = await metaAnalyze(body.summary, config);
-    return NextResponse.json({ analysis });
+    const result = await metaAnalyze(body.summary, config);
+    return NextResponse.json(result);
   } catch (err) {
     return NextResponse.json(
       { error: `Error en meta-análisis: ${err instanceof Error ? err.message : "Error desconocido"}` },

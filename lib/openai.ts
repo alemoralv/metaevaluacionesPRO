@@ -7,15 +7,33 @@ const openai = new OpenAI({
 
 const defaultModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-const SYSTEM_PROMPT = `Eres un evaluador experto de respuestas de agentes de IA para atención al cliente. Tu tarea es comparar la respuesta real de un agente con la respuesta esperada y calificar la calidad.
+const SYSTEM_PROMPT = `Eres un evaluador experto de respuestas de agentes de IA para atención al cliente.
+Tu objetivo principal es medir si la respuesta real (actualResponse) transmite el MISMO SIGNIFICADO y la MISMA INFORMACIÓN clave que la respuesta esperada (expectedResponse).
+
+Principios de evaluación:
+1) Prioriza equivalencia semántica e informativa por encima del estilo.
+2) No penalices por "echar más rollo" si lo adicional es consistente, no contradice y no inventa hechos.
+3) Penaliza fuertemente omisiones de información crítica de expectedResponse (tiempos, condiciones, restricciones, pasos obligatorios, límites, excepciones, etc.).
+4) Penaliza fuertemente invenciones/alucinaciones: afirmaciones no sustentadas por expectedResponse o que cambian el sentido.
+
+Guía de penalización sugerida:
+- Omisión menor (detalle secundario): -5 a -12 puntos en completeness.
+- Omisión relevante (condición/plazo/paso importante): -15 a -30 puntos en completeness y -5 a -15 en accuracy.
+- Invención menor no crítica: -10 a -20 puntos en relevance.
+- Invención crítica o contradictoria: -25 a -45 puntos en relevance y -10 a -30 en accuracy.
+- Si conserva significado + cobertura completa + sin invenciones: puntajes altos (90-100).
 
 Evalúa en 6 dimensiones con puntaje de 0 a 100:
-- accuracy (Precisión): ¿La respuesta real es factualmente correcta comparada con la respuesta esperada? ¿Da la misma información clave?
-- completeness (Completitud): ¿La respuesta cubre todos los puntos clave de la respuesta esperada? ¿Omitió algo importante?
-- relevance (Relevancia): ¿La respuesta se mantiene en tema, es útil y no incluye información incorrecta o inventada?
-- coherence (Coherencia): ¿La respuesta está lógicamente estructurada y es internamente consistente? ¿Fluye de manera natural?
-- clarity (Claridad): ¿La respuesta es clara, fácil de entender y está bien articulada?
-- usefulness (Utilidad): ¿La respuesta es práctica, útil y accionable para el usuario? ¿Le ayuda a resolver su problema?
+- accuracy (Precisión): fidelidad factual y semántica respecto a expectedResponse.
+- completeness (Completitud): cobertura de TODOS los puntos clave esperados, sin omisiones relevantes.
+- relevance (Relevancia): utilidad y enfoque en el tema, sin información inventada o incorrecta.
+- coherence (Coherencia): estructura lógica y consistencia interna.
+- clarity (Claridad): facilidad de comprensión y redacción.
+- usefulness (Utilidad): valor práctico para resolver la consulta del usuario.
+
+Escala:
+- Debes usar números enteros entre 0 y 100.
+- Puedes usar CUALQUIER entero; evita redondear por hábito a múltiplos de 5.
 
 Responde ÚNICAMENTE con un JSON válido con esta estructura exacta:
 {
@@ -27,6 +45,12 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta:
   "usefulness": <número entero de 0 a 100>,
   "feedback": "<retroalimentación breve en español, máximo 2-3 oraciones>"
 }`;
+
+function normalizeScore(value: unknown): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.min(100, Math.max(0, Math.round(numeric)));
+}
 
 export interface EvalRowConfig {
   model?: string;
@@ -73,12 +97,12 @@ Evalúa la respuesta real del agente comparándola con la respuesta esperada.`;
   const content = response.choices[0].message.content || "{}";
   const parsed = JSON.parse(content);
 
-  const accuracy = Math.min(100, Math.max(0, parsed.accuracy ?? 0));
-  const completeness = Math.min(100, Math.max(0, parsed.completeness ?? 0));
-  const relevance = Math.min(100, Math.max(0, parsed.relevance ?? 0));
-  const coherence = Math.min(100, Math.max(0, parsed.coherence ?? 0));
-  const clarity = Math.min(100, Math.max(0, parsed.clarity ?? 0));
-  const usefulness = Math.min(100, Math.max(0, parsed.usefulness ?? 0));
+  const accuracy = normalizeScore(parsed.accuracy);
+  const completeness = normalizeScore(parsed.completeness);
+  const relevance = normalizeScore(parsed.relevance);
+  const coherence = normalizeScore(parsed.coherence);
+  const clarity = normalizeScore(parsed.clarity);
+  const usefulness = normalizeScore(parsed.usefulness);
 
   return {
     index,
@@ -113,13 +137,22 @@ Debes generar un análisis integral en español que cubra:
 
 Responde ÚNICAMENTE con un JSON válido:
 {
-  "analysis": "<análisis completo en español, usando saltos de línea para separar secciones. Usa ## para títulos de sección y ** para negritas.>"
+  "analysis": "<análisis completo en español, usando saltos de línea para separar secciones. Usa ## para títulos de sección y ** para negritas.>",
+  "recommendations": [
+    "<recomendación concreta para ajustar configuración del agente evaluado>",
+    "<recomendación concreta y accionable>"
+  ]
 }`;
+
+export interface MetaAnalyzeResult {
+  analysis: string;
+  recommendations: string[];
+}
 
 export async function metaAnalyze(
   summaryText: string,
   config?: EvalRowConfig
-): Promise<string> {
+): Promise<MetaAnalyzeResult> {
   const reqModel = config?.model || defaultModel;
   const reqTemp = config?.temperature ?? 0.3;
 
@@ -137,5 +170,10 @@ export async function metaAnalyze(
   const content = response.choices[0].message.content || "{}";
   const parsed = JSON.parse(content);
 
-  return parsed.analysis ?? "No se pudo generar el análisis.";
+  return {
+    analysis: parsed.analysis ?? "No se pudo generar el análisis.",
+    recommendations: Array.isArray(parsed.recommendations)
+      ? parsed.recommendations.map((item: unknown) => String(item).trim()).filter(Boolean)
+      : [],
+  };
 }
