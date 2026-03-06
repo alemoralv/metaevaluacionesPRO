@@ -57,3 +57,24 @@ Cada respuesta se evalúa en 3 dimensiones (puntaje 1-10):
 - **Relevancia:** ¿Se mantiene en tema sin información inventada?
 
 Los resultados se pueden descargar como CSV con las columnas originales más las calificaciones.
+
+## Infografía estandarizada
+
+En la vista de resultados ahora existe el botón `Descargar infografia`.
+
+Flujo de generación:
+
+1. Intenta generar con NotebookLM (`notebooklm generate infographic`).
+2. Si NotebookLM no está autenticado/disponible, usa un fallback local estandarizado (SVG corporativo).
+3. Si el fallback local falla, intenta OpenAI como último recurso (si `OPENAI_API_KEY` está configurada).
+
+### Requisitos para NotebookLM (opcional pero recomendado)
+
+```bash
+pip install "notebooklm-py[browser]"
+playwright install chromium
+notebooklm login
+notebooklm list --json
+```
+
+Si no deseas usar NotebookLM, el sistema seguirá funcionando con fallback local.

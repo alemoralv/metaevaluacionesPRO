@@ -24,6 +24,7 @@ import {
 } from "@/lib/pdfGenerator";
 import { computeConsistency } from "@/lib/consistency";
 import { downloadTexFile } from "@/lib/texGenerator";
+import { buildInfographicPayload } from "@/lib/infographic";
 
 type AppState =
   | "login"
@@ -149,6 +150,7 @@ export default function Home() {
 
   const [error, setError] = useState("");
   const [pdfGenerating, setPdfGenerating] = useState(false);
+  const [infographicGenerating, setInfographicGenerating] = useState(false);
 
   const chartRefsMap = useRef<Record<string, ScoreChartsHandle | null>>({});
   const overviewPanelRef = useRef<HTMLDivElement | null>(null);
@@ -475,6 +477,108 @@ export default function Home() {
     }
   };
 
+  const handleDownloadInfographic = async () => {
+    if (!reportContext) return;
+    setInfographicGenerating(true);
+    try {
+      let panoramaChartDataUrl: string | undefined;
+      const panoramaCaptureTarget = overviewChartsCaptureRef.current;
+      if (panoramaCaptureTarget) {
+        const canvas = await html2canvas(panoramaCaptureTarget, {
+          backgroundColor: "#ffffff",
+          scale: 2,
+          useCORS: true,
+          logging: false,
+        });
+        panoramaChartDataUrl = canvas.toDataURL("image/png");
+      }
+
+      const payload = buildInfographicPayload({
+        reportContext,
+        configs: llmConfigs,
+        rows,
+        allResults,
+        metaAnalysis,
+        recommendations: metaRecommendations,
+        panoramaChartDataUrl,
+      });
+
+      const response = await fetch("/api/infographic", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-access-key": accessKey,
+        },
+        body: JSON.stringify({ payload }),
+      });
+
+      if (response.status === 401) {
+        sessionStorage.removeItem("accessKey");
+        setAccessKey("");
+        setState("login");
+        return;
+      }
+
+      if (!response.ok) {
+        let errText = "No se pudo generar la infografia";
+        try {
+          const errorData = (await response.json()) as { error?: string };
+          if (errorData.error) errText = errorData.error;
+        } catch {
+          // Keep default error text.
+        }
+        setError((prev) => `${prev ? `${prev}\n` : ""}${errText}`);
+        return;
+      }
+
+      const blob = await response.blob();
+      const contentType = response.headers.get("content-type") || "";
+
+      let finalBlob = blob;
+      if (contentType.includes("image/svg+xml")) {
+        const svgText = await blob.text();
+        const svgBlob = new Blob([svgText], { type: "image/svg+xml" });
+        const svgUrl = URL.createObjectURL(svgBlob);
+        try {
+          const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const image = new Image();
+            image.onload = () => resolve(image);
+            image.onerror = () => reject(new Error("No se pudo cargar el SVG de la infografia."));
+            image.src = svgUrl;
+          });
+          const canvas = document.createElement("canvas");
+          canvas.width = img.naturalWidth || 1600;
+          canvas.height = img.naturalHeight || 900;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0);
+            const pngBlob = await new Promise<Blob | null>((resolve) =>
+              canvas.toBlob((generatedBlob) => resolve(generatedBlob), "image/png")
+            );
+            if (pngBlob) {
+              finalBlob = pngBlob;
+            }
+          }
+        } finally {
+          URL.revokeObjectURL(svgUrl);
+        }
+      }
+
+      const url = URL.createObjectURL(finalBlob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `infografia_${Date.now()}.png`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setInfographicGenerating(false);
+    }
+  };
+
   const handleReset = () => {
     setRows([]);
     setAllResults({});
@@ -709,7 +813,12 @@ export default function Home() {
             <div className="flex justify-center gap-3">
               <button
                 onClick={handleDownloadPdf}
-                disabled={pdfGenerating || activeTab === "meta" || activeTab === "overview"}
+                disabled={
+                  pdfGenerating ||
+                  infographicGenerating ||
+                  activeTab === "meta" ||
+                  activeTab === "overview"
+                }
                 className="px-4 py-2 bg-[#165185] text-white text-sm rounded-lg hover:bg-[#0e3d66] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
                 {pdfGenerating ? (
@@ -723,7 +832,7 @@ export default function Home() {
               </button>
               <button
                 onClick={handleDownloadAllPdf}
-                disabled={pdfGenerating}
+                disabled={pdfGenerating || infographicGenerating}
                 className="px-4 py-2 bg-[#165185] text-white text-sm rounded-lg hover:bg-[#0e3d66] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
                 {pdfGenerating ? (
@@ -737,12 +846,27 @@ export default function Home() {
               </button>
               <button
                 onClick={handleDownloadTex}
-                className="px-4 py-2 bg-[#165185] text-white text-sm rounded-lg hover:bg-[#0e3d66] transition-colors flex items-center gap-2"
+                disabled={pdfGenerating || infographicGenerating}
+                className="px-4 py-2 bg-[#165185] text-white text-sm rounded-lg hover:bg-[#0e3d66] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
                 Descargar LaTeX
+              </button>
+              <button
+                onClick={handleDownloadInfographic}
+                disabled={pdfGenerating || infographicGenerating}
+                className="px-4 py-2 bg-[#165185] text-white text-sm rounded-lg hover:bg-[#0e3d66] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {infographicGenerating ? (
+                  <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h10M7 12h10M7 17h6M5 4h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z" />
+                  </svg>
+                )}
+                Descargar infografia
               </button>
             </div>
 

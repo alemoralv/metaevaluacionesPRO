@@ -1,0 +1,185 @@
+﻿Diagnose log at 2026-03-03T19:11:25Z
+
+AppPath: C:\Program Files\Git\mingw64\bin\git-credential-manager.exe
+InstallDir: C:\Program Files\Git\mingw64\bin\
+Version: 2.6.1+786ab03440ddc82e807a97c0e540f5247e44cec6
+
+------------
+Diagnostic: Environment
+Skipped: False
+Success: True
+Exception: None
+Log:
+OSType: Windows
+OSVersion: 10.0 (build 26200)
+Reading environment variables... OK
+ Variables:
+HOMEPATH=\Users\alexm
+DriverData=C:\Windows\System32\Drivers\DriverData
+COMPUTERNAME=MORALVCENTRAL
+GIT_TRACE2_PARENT_SID=23349d4e-4bfa-44ce-a4e2-a2b77377128b
+CommonProgramFiles(x86)=C:\Program Files (x86)\Common Files
+OneDrive=C:\Users\alexm\OneDrive
+windir=C:\Windows
+SESSIONNAME=Console
+CURSOR_AGENT=1
+PROCESSOR_REVISION=bd01
+PROCESSOR_ARCHITECTURE=x86
+PATHEXT=.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC;.CPL
+VSCODE_IPC_HOOK=\\.\pipe\5c7ba060-2.5.26-main-sock
+SystemDrive=C:
+GIT_EXEC_PATH=C:/Program Files/Git/mingw64/libexec/git-core
+TEMP=C:\Users\alexm\AppData\Local\Temp
+LOCALAPPDATA=C:\Users\alexm\AppData\Local
+MSYSTEM=MINGW64
+TERM=dumb
+CURSOR_TRACE_ID=946f49a36d2e4c5e83265f9d273e2dac
+ProgramW6432=C:\Program Files
+VSCODE_ESM_ENTRYPOINT=vs/workbench/api/node/extensionHostProcess
+USERDOMAIN=MORALVCENTRAL
+NO_COLOR=1
+PROCESSOR_LEVEL=6
+PROCESSOR_IDENTIFIER=Intel64 Family 6 Model 189 Stepping 1, GenuineIntel
+TMPDIR=C:\Users\alexm\AppData\Local\Temp
+CURSOR_EXTENSION_HOST_ROLE=agent-exec
+EFC_24404_1592913036=1
+ProgramFiles(x86)=C:\Program Files (x86)
+PUBLIC=C:\Users\Public
+NUMBER_OF_PROCESSORS=8
+CommonProgramFiles=C:\Program Files (x86)\Common Files
+TMP=C:\Users\alexm\AppData\Local\Temp
+VSCODE_HANDLES_UNCAUGHT_ERRORS=true
+CHROME_CRASHPAD_PIPE_NAME=\\.\pipe\crashpad_9884_XSJQTKNFAWAJWFKQ
+PLINK_PROTOCOL=ssh
+ProgramData=C:\ProgramData
+GIT_CURL_VERBOSE=1
+ProgramFiles=C:\Program Files (x86)
+VSCODE_NLS_CONFIG={"userLocale":"en-us","osLocale":"en-us","resolvedLanguage":"en","defaultMessagesFile":"C:\\Users\\alexm\\AppData\\Local\\Programs\\cursor\\resources\\app\\out\\nls.messages.json","locale":"en-us","availableLanguages":{}}
+VSCODE_CODE_CACHE_PATH=C:\Users\alexm\AppData\Roaming\Cursor\CachedData\7d96c2a03bb088ad367615e9da1a3fe20fbbc6a0
+VSCODE_PROCESS_TITLE=extension-host (agent-exec) [6-33]
+SystemRoot=C:\Windows
+HOME=C:\Users\alexm
+FORCE_COLOR=0
+LC_CTYPE=C.UTF-8
+CommonProgramW6432=C:\Program Files\Common Files
+ZES_ENABLE_SYSMAN=1
+LOGONSERVER=\\MORALVCENTRAL
+USERPROFILE=C:\Users\alexm
+USERDOMAIN_ROAMINGPROFILE=MORALVCENTRAL
+APPDATA=C:\Users\alexm\AppData\Roaming
+HOMEDRIVE=C:
+VSCODE_PID=9884
+_ZO_DOCTOR=0
+PSModulePath=C:\Users\alexm\OneDrive\3 BackUps\2023\BackUpComputer\WindowsPowerShell\Modules;C:\Program Files\WindowsPowerShell\Modules;C:\Windows\system32\WindowsPowerShell\v1.0\Modules
+VSCODE_CWD=C:\Users\alexm\AppData\Local\Programs\cursor
+USERNAME=alexm
+PROCESSOR_ARCHITEW6432=AMD64
+PSExecutionPolicyPreference=Bypass
+OS=Windows_NT
+ComSpec=C:\Windows\system32\cmd.exe
+Path=C:/Program Files/Git/mingw64/libexec/git-core;C:\Program Files\Git\mingw64\bin;C:\Program Files\Git\usr\bin;C:\Users\alexm\bin;C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0\;C:\Windows\System32\OpenSSH\;C:\ffmpeg\bin;C:\Program Files\Git\cmd;C:\Program Files\GitHub CLI\;C:\Program Files\Docker\Docker\resources\bin;C:\Program Files\nodejs\;C:\Users\alexm\AppData\Local\Programs\Python\Python312\Scripts\;C:\Users\alexm\AppData\Local\Programs\Python\Python312\;C:\Users\alexm\AppData\Local\Programs\Python\Python314\Scripts\;C:\Users\alexm\AppData\Local\Programs\Python\Python314\;C:\Users\alexm\AppData\Local\Programs\Python\Launcher\;C:\Users\alexm\.local\bin;C:\Users\alexm\AppData\Local\Microsoft\WindowsApps;C:\Users\alexm\AppData\Local\Programs\Ollama;C:\Users\alexm\AppData\Local\Programs\Microsoft VS Code\bin;C:\Users\alexm\AppData\Local\Programs\cursor\resources\app\bin;C:\Users\alexm\AppData\Local\Programs\MiKTeX\miktex\bin\x64\;C:\Users\alexm\AppData\Local\Python\bin;C:\Program Files\LibreOffice\program;C:\Users\alexm\AppData\Local\Programs\Antigravity\bin;C:\Users\alexm\AppData\Local\Microsoft\WinGet\Packages\Stripe.StripeCli_Microsoft.Winget.Source_8wekyb3d8bbwe;C:\Users\alexm\AppData\Roaming\npm
+VSCODE_CRASH_REPORTER_PROCESS_TYPE=extensionHost
+OneDriveConsumer=C:\Users\alexm\OneDrive
+ALLUSERSPROFILE=C:\ProgramData
+
+
+------------
+Diagnostic: File system
+Skipped: False
+Success: True
+Exception: None
+Log:
+Temporary directory is 'C:\Users\alexm\AppData\Local\Temp\'...
+Checking basic file I/O...
+Writing to temporary file 'C:\Users\alexm\AppData\Local\Temp\83c141948b1b84e78fbfd492'... OK
+Reading from temporary file 'C:\Users\alexm\AppData\Local\Temp\83c141948b1b84e78fbfd492'... OK
+Deleting temporary file 'C:\Users\alexm\AppData\Local\Temp\83c141948b1b84e78fbfd492'... OK
+Testing IFileSystem instance...
+UserHomePath: C:\Users\alexm
+UserDataDirectoryPath: C:\Users\alexm\.gcm
+GetCurrentDirectory(): C:\Users\alexm\projects\Profuturo\metaevaluacionesPRO1
+
+------------
+Diagnostic: Networking
+Skipped: False
+Success: True
+Exception: None
+Log:
+Checking networking and HTTP stack...
+Creating HTTP client... OK
+IsNetworkAvailable: True
+Sending HEAD request to http://example.com...Sending HEAD request to https://example.com... OK
+Acquiring free TCP port... OK
+Testing local HTTP loopback connections...
+Creating new HTTP listener for http://localhost:52813/... OK
+Waiting for loopback connection... OK
+Writing response... OK
+Waiting for response data... OK
+Loopback connection data OK
+
+------------
+Diagnostic: Git
+Skipped: False
+Success: True
+Exception: None
+Log:
+Getting Git version... OK
+Git version is '2.51.2.windows.1'
+Locating current repository...Git repository at 'C:/Users/alexm/projects/Profuturo/metaevaluacionesPRO1/.git'
+ OK
+Listing all Git configuration... OK
+Git configuration:
+file:C:/Program Files/Git/etc/gitconfig	diff.astextplain.textconv=astextplain
+file:C:/Program Files/Git/etc/gitconfig	filter.lfs.clean=git-lfs clean -- %f
+file:C:/Program Files/Git/etc/gitconfig	filter.lfs.smudge=git-lfs smudge -- %f
+file:C:/Program Files/Git/etc/gitconfig	filter.lfs.process=git-lfs filter-process
+file:C:/Program Files/Git/etc/gitconfig	filter.lfs.required=true
+file:C:/Program Files/Git/etc/gitconfig	http.sslbackend=schannel
+file:C:/Program Files/Git/etc/gitconfig	core.autocrlf=true
+file:C:/Program Files/Git/etc/gitconfig	core.fscache=true
+file:C:/Program Files/Git/etc/gitconfig	core.symlinks=false
+file:C:/Program Files/Git/etc/gitconfig	pull.rebase=false
+file:C:/Program Files/Git/etc/gitconfig	credential.helper=manager
+file:C:/Program Files/Git/etc/gitconfig	credential.https://dev.azure.com.usehttppath=true
+file:C:/Program Files/Git/etc/gitconfig	init.defaultbranch=master
+file:C:/Users/alexm/.gitconfig	user.name=alejandromorera
+file:C:/Users/alexm/.gitconfig	user.email=alejandro.morera@profuturo.com.mx
+file:C:/Users/alexm/.gitconfig	credential.helper=manager
+file:.git/config	core.repositoryformatversion=0
+file:.git/config	core.filemode=false
+file:.git/config	core.bare=false
+file:.git/config	core.logallrefupdates=true
+file:.git/config	core.symlinks=false
+file:.git/config	core.ignorecase=true
+file:.git/config	remote.origin.url=https://github.com/alemoralv/metaevaluacionesPRO.git
+file:.git/config	remote.origin.fetch=+refs/heads/*:refs/remotes/origin/*
+file:.git/config	branch.main.remote=origin
+file:.git/config	branch.main.merge=refs/heads/main
+
+
+------------
+Diagnostic: Credential storage
+Skipped: False
+Success: True
+Exception: None
+Log:
+ICredentialStore instance is of type: CredentialStore
+Writing test credential... OK
+Reading test credential... OK
+Deleting test credential... OK
+
+------------
+Diagnostic: Microsoft authentication (AAD/MSA)
+Skipped: False
+Success: True
+Exception: None
+Log:
+Broker is not enabled.
+Flow type is: Auto
+Gathering MSAL token cache data... OK
+CacheDirectory: C:\Users\alexm\AppData\Local\.IdentityService
+CacheFileName: msal.cache
+CacheFilePath: C:\Users\alexm\AppData\Local\.IdentityService\msal.cache
+Creating cache helper... OK
+Verifying MSAL token cache persistence... OK
+
