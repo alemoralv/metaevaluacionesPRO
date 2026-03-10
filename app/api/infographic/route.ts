@@ -202,6 +202,7 @@ async function tryOpenAiFallback(payload: InfographicPayload): Promise<Buffer | 
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const prompt = [
     `Create a polished infographic in Spanish with a clean corporate style.`,
+    `Branding requirement: include the company name "Profuturo" in a clear and prominent header.`,
     `Use exactly these key facts and do not invent numbers.`,
     infographicPayloadToMarkdown(payload),
   ].join("\n\n");
@@ -241,22 +242,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Payload de infografia invalido" }, { status: 400 });
   }
 
-  try {
-    const notebookImage = await tryNotebookLmGeneration(payload);
-    if (notebookImage) {
-      return new NextResponse(new Uint8Array(notebookImage), {
-        status: 200,
-        headers: {
-          "Content-Type": "image/png",
-          "Content-Disposition": `attachment; filename="infografia-${randomUUID()}.png"`,
-          "x-infographic-source": "notebooklm",
-        },
-      });
-    }
-  } catch {
-    // Proceed with fallbacks.
-  }
-
+  // Primary path: deterministic branded template.
   try {
     const localSvg = renderInfographicSvg(payload);
     return new NextResponse(localSvg, {
@@ -264,11 +250,32 @@ export async function POST(request: NextRequest) {
       headers: {
         "Content-Type": "image/svg+xml; charset=utf-8",
         "Content-Disposition": `attachment; filename="infografia-${randomUUID()}.svg"`,
-        "x-infographic-source": "local-svg",
+        "x-infographic-source": "local-template",
       },
     });
   } catch {
-    // Last fallback (optional).
+    // Continue with optional fallbacks below.
+  }
+
+  const notebookFallbackEnabled =
+    process.env.INFOGRAPHIC_ENABLE_NOTEBOOKLM_FALLBACK === "1";
+
+  if (notebookFallbackEnabled) {
+    try {
+      const notebookImage = await tryNotebookLmGeneration(payload);
+      if (notebookImage) {
+        return new NextResponse(new Uint8Array(notebookImage), {
+          status: 200,
+          headers: {
+            "Content-Type": "image/png",
+            "Content-Disposition": `attachment; filename="infografia-${randomUUID()}.png"`,
+            "x-infographic-source": "notebooklm-fallback",
+          },
+        });
+      }
+    } catch {
+      // Move to last fallback.
+    }
   }
 
   try {
@@ -279,7 +286,7 @@ export async function POST(request: NextRequest) {
         headers: {
           "Content-Type": "image/png",
           "Content-Disposition": `attachment; filename="infografia-${randomUUID()}.png"`,
-          "x-infographic-source": "openai",
+          "x-infographic-source": "openai-fallback",
         },
       });
     }
@@ -290,7 +297,7 @@ export async function POST(request: NextRequest) {
   return NextResponse.json(
     {
       error:
-        "No fue posible generar la infografia: NotebookLM no disponible y fallaron los fallbacks.",
+        "No fue posible generar la infografia: fallo renderer de plantilla y no hubo fallback disponible.",
     },
     { status: 500 }
   );

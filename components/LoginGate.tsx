@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, FormEvent } from "react";
+import logoProfuturo from "@/profuturologo.png";
 
 interface LoginGateProps {
   onLogin: (key: string) => void;
@@ -41,10 +42,22 @@ export default function LoginGate({ onLogin }: LoginGateProps) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4">
+    <div className="min-h-screen flex items-center justify-center px-4 bg-white">
       <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <h1 className="text-2xl font-semibold tracking-tight">
+        <div className="relative text-center mb-8">
+          <div
+            className="pointer-events-none absolute left-1/2 top-[-180px] h-[22rem] w-[40rem] -translate-x-1/2 overflow-hidden opacity-15"
+          >
+            <div
+              className="h-full w-full bg-no-repeat"
+              style={{
+                backgroundImage: `url(${logoProfuturo.src})`,
+                backgroundPosition: "center 0",
+                backgroundSize: "1120px auto",
+              }}
+            />
+          </div>
+          <h1 className="relative z-10 text-2xl font-semibold tracking-tight">
             MetaEvaluaciones PRO
           </h1>
           <p className="text-sm text-gray-500 mt-1">

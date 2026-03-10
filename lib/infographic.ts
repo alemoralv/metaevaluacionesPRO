@@ -196,6 +196,7 @@ export function infographicPayloadToMarkdown(payload: InfographicPayload): strin
 export function buildNotebookLmInfographicPrompt(payload: InfographicPayload): string {
   return [
     `Genera una infografia profesional en espanol, orientacion landscape, estilo corporativo.`,
+    `El branding debe incluir de forma visible y obligatoria la palabra Profuturo en encabezado.`,
     `Usa SOLO los datos numericos provistos y manten consistencia visual.`,
     `Incluye: encabezado, KPI principales, metricas por dimension, resumen de evaluadores y hallazgos clave.`,
     `No inventes numeros ni conclusiones.`,
