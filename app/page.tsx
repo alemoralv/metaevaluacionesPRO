@@ -21,6 +21,7 @@ import {
 import {
   generateSingleEvaluatorPdf,
   generateAllEvaluatorsPdf,
+  generateOverviewSlidesPdf,
 } from "@/lib/pdfGenerator";
 import { computeConsistency } from "@/lib/consistency";
 import { downloadTexFile } from "@/lib/texGenerator";
@@ -439,6 +440,20 @@ export default function Home() {
     }
   };
 
+  const handleDownloadOverviewSlidesPdf = async () => {
+    if (!reportContext || llmConfigs.length === 0) return;
+    setPdfGenerating(true);
+    try {
+      await generateOverviewSlidesPdf({
+        reportContext,
+        configs: llmConfigs,
+        allResults,
+      });
+    } finally {
+      setPdfGenerating(false);
+    }
+  };
+
   const handleDownloadTex = async () => {
     if (!reportContext) return;
     setPdfGenerating(true);
@@ -843,6 +858,20 @@ export default function Home() {
                   </svg>
                 )}
                 Descargar todo en PDF
+              </button>
+              <button
+                onClick={handleDownloadOverviewSlidesPdf}
+                disabled={pdfGenerating || infographicGenerating}
+                className="px-4 py-2 bg-[#165185] text-white text-sm rounded-lg hover:bg-[#0e3d66] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {pdfGenerating ? (
+                  <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v12m6-6H6m3-9h6a2 2 0 012 2v14H7V5a2 2 0 012-2z" />
+                  </svg>
+                )}
+                PDF diapositivas
               </button>
               <button
                 onClick={handleDownloadTex}
