@@ -688,6 +688,7 @@ export interface TexReportParams {
   metaAnalysis?: string | null;
   recommendations?: string[] | null;
   panoramaImages?: TexImageAsset[];
+  fileNamePrefix?: string;
 }
 
 export function generateFullTexReport(params: TexReportParams): string {
@@ -743,7 +744,9 @@ export function generateFullTexReport(params: TexReportParams): string {
 export function downloadTexFile(params: TexReportParams) {
   const content = generateFullTexReport(params);
   const zip = new JSZip();
-  const baseName = `evaluacion_agente_${formatDateES(new Date()).replace(/ /g, "_")}`;
+  const fileNamePrefix = params.fileNamePrefix?.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const baseNameCore = `evaluacion_agente_${formatDateES(new Date()).replace(/ /g, "_")}`;
+  const baseName = fileNamePrefix ? `${fileNamePrefix}_${baseNameCore}` : baseNameCore;
   zip.file(`${baseName}.tex`, content);
 
   const images = params.panoramaImages || [];

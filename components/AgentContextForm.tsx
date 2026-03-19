@@ -7,6 +7,9 @@ interface AgentContextFormProps {
   initialValue?: AgentReportContext | null;
   onSubmit: (context: AgentReportContext) => void;
   disabled?: boolean;
+  submitLabel?: string;
+  title?: string;
+  description?: string;
 }
 
 const MAX_TXT_SIZE_BYTES = 512_000;
@@ -34,6 +37,9 @@ export default function AgentContextForm({
   initialValue,
   onSubmit,
   disabled = false,
+  submitLabel = "Continuar a carga de CSV",
+  title = "Datos del reporte",
+  description = "Esta informacion se incluira en todos los reportes",
 }: AgentContextFormProps) {
   const [context, setContext] = useState<AgentReportContext>(
     initialValue ?? EMPTY_CONTEXT
@@ -115,10 +121,8 @@ export default function AgentContextForm({
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       <div className="text-center">
-        <h2 className="text-xl font-medium">Datos del reporte</h2>
-        <p className="text-sm text-gray-500 mt-1">
-          Esta informacion se incluira en todos los reportes
-        </p>
+        <h2 className="text-xl font-medium">{title}</h2>
+        <p className="text-sm text-gray-500 mt-1">{description}</p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-5">
@@ -280,7 +284,7 @@ export default function AgentContextForm({
           disabled={disabled || !isValid}
           className="w-full py-3 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          Continuar a carga de CSV
+          {submitLabel}
         </button>
       </form>
     </div>

@@ -53,6 +53,16 @@ function boolToYesNo(value: boolean): string {
   return value ? "si" : "no";
 }
 
+function evaluatorDisplayName(reportContext: AgentReportContext): string {
+  return reportContext.evaluatorName?.trim() || "Evaluador no especificado";
+}
+
+function withPrefix(fileNamePrefix: string | undefined, fileName: string): string {
+  if (!fileNamePrefix) return fileName;
+  const safePrefix = fileNamePrefix.replace(/[^a-zA-Z0-9._-]/g, "_");
+  return `${safePrefix}_${fileName}`;
+}
+
 function normalizeReportText(input: string): string {
   if (!input) return "";
   let text = input
@@ -195,7 +205,7 @@ function addCoverPage(
 
   doc.setFontSize(11);
   doc.setFont("helvetica", "normal");
-  doc.text(`Evaluador: ${reportContext.evaluatorName}`, PAGE_W / 2, 192, {
+  doc.text(`Evaluador: ${evaluatorDisplayName(reportContext)}`, PAGE_W / 2, 192, {
     align: "center",
   });
 
@@ -1163,17 +1173,23 @@ interface OverviewSlidesPdfParams {
   reportContext: AgentReportContext;
   configs: LLMConfig[];
   allResults: Record<string, EvaluationResult[]>;
+  fileNamePrefix?: string;
 }
 
+const CARBOT_BLUE: [number, number, number] = [11, 74, 145];
+const CARBOT_GOLD: [number, number, number] = [229, 181, 25];
+const CARBOT_BORDER: [number, number, number] = [196, 201, 210];
+const CARBOT_PANEL: [number, number, number] = [241, 243, 246];
+const CARBOT_BAR: [number, number, number] = [117, 134, 152];
+
 const SLIDE_PALETTE: Array<[number, number, number]> = [
-  [77, 91, 206],
-  [29, 155, 173],
-  [16, 146, 89],
-  [217, 119, 6],
-  [220, 38, 38],
+  [81, 74, 214],
+  [27, 143, 173],
+  [17, 146, 93],
+  [220, 125, 10],
+  [220, 39, 39],
   [124, 58, 237],
-  [15, 118, 110],
-  [2, 132, 199],
+  [13, 148, 136],
 ];
 
 function avgNumbers(vals: number[]): number {
@@ -1196,6 +1212,41 @@ function drawRoundedBox(
   doc.roundedRect(x, y, w, h, 4, 4, "FD");
 }
 
+function addSlidesChrome(doc: jsPDF, title: string, pageNumber: number, totalPages: number) {
+  const slideW = doc.internal.pageSize.getWidth();
+  const slideH = doc.internal.pageSize.getHeight();
+
+  doc.setFillColor(248, 249, 251);
+  doc.rect(0, 0, slideW, slideH, "F");
+
+  doc.setFillColor(...CARBOT_BLUE);
+  doc.rect(0, 0, slideW, 16, "F");
+
+  doc.setDrawColor(...CARBOT_GOLD);
+  doc.setLineWidth(1.2);
+  doc.line(0, 16.2, slideW, 16.2);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11.5);
+  doc.setTextColor(...WHITE);
+  doc.text(title, 7, 10.3);
+
+  doc.setDrawColor(220, 224, 230);
+  doc.setLineWidth(0.35);
+  doc.line(0, slideH - 11, slideW, slideH - 11);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7.2);
+  doc.setTextColor(...CARBOT_BLUE);
+  doc.text("Profuturo", 8, slideH - 6.2);
+  doc.setTextColor(...GRAY);
+  doc.text("| Equipo de Inteligencia Artificial", 21, slideH - 6.2);
+
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...CARBOT_BLUE);
+  doc.text(`${pageNumber} / ${totalPages}`, slideW - 8, slideH - 6.2, { align: "right" });
+}
+
 function addOverviewSlide1(
   doc: jsPDF,
   reportContext: AgentReportContext,
@@ -1204,6 +1255,16 @@ function addOverviewSlide1(
 ) {
   const slideW = doc.internal.pageSize.getWidth();
   const slideH = doc.internal.pageSize.getHeight();
+  addSlidesChrome(
+    doc,
+    `${evaluatorDisplayName(reportContext)} — Resultados de Evaluación`,
+    1,
+    2
+  );
+
+  const contentTop = 24;
+  const contentBottom = slideH - 15;
+  const contentHeight = contentBottom - contentTop;
   const evaluatorStats = buildEvaluatorStats(configs, allResults);
   const totalQuestions = evaluatorStats.length > 0 ? evaluatorStats[0].count : 0;
   const globalAvg = avgNumbers(evaluatorStats.map((e) => e.dims.overallScore.avg));
@@ -1236,28 +1297,28 @@ function addOverviewSlide1(
     ? String(topPs[0])
     : `${topPs[0]}-${topPs[topPs.length - 1]}`;
 
-  const leftX = 14;
-  const rightX = 157;
-  const leftW = 134;
-  const rightW = slideW - rightX - 14;
+  const leftX = 8;
+  const leftW = 146;
+  const rightX = leftX + leftW + 7;
+  const rightW = slideW - rightX - 8;
+  const baseY = contentTop + 4;
 
-  doc.setFillColor(250, 251, 253);
-  doc.rect(0, 0, slideW, slideH, "F");
-  doc.setTextColor(...DARK);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(16);
-  doc.text(`${reportContext.agentName} — Panorama general`, leftX, 14);
+  doc.setFontSize(9);
+  doc.setTextColor(...GRAY);
+  doc.text(`Agente evaluado: ${reportContext.agentName}`, leftX, contentTop);
+  doc.text(`Evaluador: ${evaluatorDisplayName(reportContext)}`, leftX + 78, contentTop);
 
-  drawRoundedBox(doc, leftX + 24, 20, leftW - 48, 28, [239, 244, 251], BLUE);
+  drawRoundedBox(doc, leftX + 26, baseY, leftW - 52, 28, [231, 238, 248], CARBOT_BLUE);
   doc.setFont("helvetica", "bold");
-  doc.setTextColor(...BLUE);
+  doc.setTextColor(...CARBOT_BLUE);
   doc.setFontSize(10);
-  doc.text("PROMEDIO GLOBAL", leftX + leftW / 2, 31, { align: "center" });
+  doc.text("PROMEDIO GLOBAL", leftX + leftW / 2, baseY + 11, { align: "center" });
   doc.setFontSize(22);
-  doc.text(globalAvg.toFixed(1), leftX + leftW / 2, 42, { align: "center" });
+  doc.text(globalAvg.toFixed(1), leftX + leftW / 2, baseY + 22, { align: "center" });
 
   const cardW = (leftW - 8) / 3;
-  const cardY = 54;
+  const cardY = baseY + 35;
   const smallCards = [
     { label: "PREGUNTAS", value: String(totalQuestions) },
     { label: "MEJOR", value: best ? best.dims.overallScore.avg.toFixed(1) : "0.0" },
@@ -1265,36 +1326,36 @@ function addOverviewSlide1(
   ];
   smallCards.forEach((card, index) => {
     const x = leftX + index * (cardW + 4);
-    drawRoundedBox(doc, x, cardY, cardW, 30, [247, 248, 250], [198, 204, 212]);
+    drawRoundedBox(doc, x, cardY, cardW, 30, [247, 248, 250], CARBOT_BORDER);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(...GRAY);
     doc.setFontSize(8.5);
     doc.text(card.label, x + cardW / 2, cardY + 12, { align: "center" });
-    doc.setTextColor(...BLUE);
+    doc.setTextColor(...CARBOT_BLUE);
     doc.setFontSize(16);
     doc.text(card.value, x + cardW / 2, cardY + 22, { align: "center" });
   });
 
-  drawRoundedBox(doc, leftX + 8, 90, leftW - 16, 42, [245, 247, 250], [202, 206, 214]);
+  drawRoundedBox(doc, leftX + 12, cardY + 38, leftW - 24, 42, CARBOT_PANEL, CARBOT_BORDER);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...GRAY);
   doc.setFontSize(10);
-  doc.text(`EVALUADORES LLM (${models.join(", ")})`, leftX + 14, 102);
+  doc.text(`EVALUADORES LLM (${models.join(", ")})`, leftX + 18, cardY + 50);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...DARK);
   doc.setFontSize(9);
-  doc.text(temps.join("  |  "), leftX + 14, 113);
-  doc.text(`Top P general: ${topPLabel}`, leftX + 14, 124);
+  doc.text(temps.join("  |  "), leftX + 18, cardY + 62);
+  doc.text(`Top P general: ${topPLabel}`, leftX + 18, cardY + 73);
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(13);
-  doc.setTextColor(...BLUE);
-  doc.text("Métricas por Dimensión (%)", rightX, 25);
+  doc.setTextColor(...CARBOT_BLUE);
+  doc.text("Métricas por Dimensión (%)", rightX, baseY + 4);
 
   const chartX = rightX;
-  const chartY = 30;
-  const chartW = rightW - 4;
-  const chartH = 78;
+  const chartY = baseY + 8;
+  const chartW = rightW - 2;
+  const chartH = 72;
   const topPad = 8;
   const leftPad = 36;
   const rightPad = 10;
@@ -1321,7 +1382,7 @@ function addOverviewSlide1(
     doc.setFontSize(9);
     doc.text(dim.label, chartX + 2, centerY + 1, { align: "left" });
 
-    doc.setFillColor(118, 135, 154);
+    doc.setFillColor(...CARBOT_BAR);
     doc.rect(barX, barY, barW, barH, "F");
 
     doc.setFont("helvetica", "bold");
@@ -1330,9 +1391,11 @@ function addOverviewSlide1(
     doc.text(`${dim.value.toFixed(0)}`, barX + barW + 3, centerY + 1);
   });
 
-  drawRoundedBox(doc, rightX + 1, 113, rightW - 6, slideH - 113 - 10, [245, 247, 250], [202, 206, 214]);
-  const confX = rightX + 8;
-  let confY = 124;
+  const confYStart = chartY + chartH + 6;
+  const confH = Math.max(45, contentHeight - (confYStart - contentTop));
+  drawRoundedBox(doc, rightX + 2, confYStart, rightW - 4, confH, CARBOT_PANEL, CARBOT_BORDER);
+  const confX = rightX + 10;
+  let confY = confYStart + 10;
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...GRAY);
   doc.setFontSize(11);
@@ -1369,7 +1432,10 @@ function addOverviewSlide1(
     { label: "Herramientas", value: reportContext.capabilities.tools },
   ];
   restrictions.forEach((item) => {
-    doc.text(item.label, confX + 4, confY);
+    doc.setTextColor(200, 45, 45);
+    doc.text("x", confX + 2, confY);
+    doc.setTextColor(...DARK);
+    doc.text(item.label, confX + 6, confY);
     doc.setFont("helvetica", "bold");
     doc.text(item.value ? "SI" : "NO", confX + 66, confY);
     doc.setFont("helvetica", "normal");
@@ -1385,25 +1451,30 @@ function addOverviewSlide2(
 ) {
   const slideW = doc.internal.pageSize.getWidth();
   const slideH = doc.internal.pageSize.getHeight();
+  addSlidesChrome(
+    doc,
+    `${evaluatorDisplayName(reportContext)} — Comparación de evaluadores`,
+    2,
+    2
+  );
+
   const evaluatorStats = buildEvaluatorStats(configs, allResults);
-  const chartX = 18;
-  const chartY = 34;
-  const chartW = slideW - 36;
-  const chartH = 124;
+  const chartX = 13;
+  const chartY = 31;
+  const chartW = slideW - 26;
+  const chartH = 134;
   const axisLeft = chartX + 26;
   const axisBottom = chartY + chartH;
   const axisTop = chartY;
-  const axisW = chartW - 36;
+  const axisW = chartW - 32;
   const axisH = chartH;
   const yMax = 100;
 
-  doc.setFillColor(250, 251, 253);
-  doc.rect(0, 0, slideW, slideH, "F");
-  drawRoundedBox(doc, 10, 10, slideW - 20, slideH - 20, [248, 250, 252], [220, 226, 235]);
+  drawRoundedBox(doc, 8, 22, slideW - 16, slideH - 36, [248, 250, 252], [220, 226, 235]);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...DARK);
   doc.setFontSize(15);
-  doc.text(`${reportContext.agentName} — Comparación de evaluadores`, 18, 24);
+  doc.text("Comparación de evaluadores — Promedios por dimensión", 15, 29);
 
   doc.setDrawColor(206, 213, 222);
   doc.setLineWidth(0.25);
@@ -1446,13 +1517,13 @@ function addOverviewSlide2(
     doc.text(dim.label, axisLeft + dimIndex * groupW + groupW / 2, axisBottom + 7, { align: "center" });
   });
 
-  const legendYStart = axisBottom + 18;
+  const legendYStart = axisBottom + 10;
   const legendStep = 42;
-  const maxLegendCols = Math.max(1, Math.floor((slideW - 34) / legendStep));
+  const maxLegendCols = Math.max(1, Math.floor((slideW - 42) / legendStep));
   evaluatorStats.forEach((stat, index) => {
     const row = Math.floor(index / maxLegendCols);
     const col = index % maxLegendCols;
-    const x = 20 + col * legendStep;
+    const x = 16 + col * legendStep;
     const y = legendYStart + row * 10;
     const color = SLIDE_PALETTE[index % SLIDE_PALETTE.length];
     doc.setFillColor(...color);
@@ -1466,13 +1537,18 @@ function addOverviewSlide2(
 }
 
 export async function generateOverviewSlidesPdf(params: OverviewSlidesPdfParams) {
-  const { reportContext, configs, allResults } = params;
+  const { reportContext, configs, allResults, fileNamePrefix } = params;
   const evaluationDate = new Date();
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
   addOverviewSlide1(doc, reportContext, configs, allResults);
   doc.addPage();
   addOverviewSlide2(doc, reportContext, configs, allResults);
-  doc.save(`evaluacion_panorama_slides_${formatDateES(evaluationDate).replace(/ /g, "_")}.pdf`);
+  doc.save(
+    withPrefix(
+      fileNamePrefix,
+      `evaluacion_panorama_slides_${formatDateES(evaluationDate).replace(/ /g, "_")}.pdf`
+    )
+  );
 }
 
 export interface SinglePdfParams {
@@ -1481,10 +1557,11 @@ export interface SinglePdfParams {
   rows: EvaluationRow[];
   results: EvaluationResult[];
   chartsContainer: HTMLDivElement | null;
+  fileNamePrefix?: string;
 }
 
 export async function generateSingleEvaluatorPdf(params: SinglePdfParams) {
-  const { reportContext, config, rows, results, chartsContainer } = params;
+  const { reportContext, config, rows, results, chartsContainer, fileNamePrefix } = params;
   const evaluationDate = new Date();
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const label = `${config.model} (T=${config.temperature})`;
@@ -1503,11 +1580,11 @@ export async function generateSingleEvaluatorPdf(params: SinglePdfParams) {
 
   addPageNumbers(
     doc,
-    `Evaluación del agente: ${reportContext.agentName} | ${reportContext.evaluatorName}`
+    `Evaluación del agente: ${reportContext.agentName} | ${evaluatorDisplayName(reportContext)}`
   );
 
   const safeModel = config.model.replace(/[^a-zA-Z0-9._-]/g, "_");
-  doc.save(`evaluacion_${safeModel}_T${config.temperature}.pdf`);
+  doc.save(withPrefix(fileNamePrefix, `evaluacion_${safeModel}_T${config.temperature}.pdf`));
 }
 
 export interface AllPdfParams {
@@ -1521,6 +1598,7 @@ export interface AllPdfParams {
   consistency: QuestionConsistency[] | null;
   metaAnalysis: string | null;
   recommendations: string[] | null;
+  fileNamePrefix?: string;
 }
 
 export async function generateAllEvaluatorsPdf(params: AllPdfParams) {
@@ -1535,6 +1613,7 @@ export async function generateAllEvaluatorsPdf(params: AllPdfParams) {
     metaAnalysis,
     recommendations,
     reportContext,
+    fileNamePrefix,
   } = params;
   const evaluationDate = new Date();
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -1575,8 +1654,13 @@ export async function generateAllEvaluatorsPdf(params: AllPdfParams) {
   addEndRule(doc, y);
   addPageNumbers(
     doc,
-    `Evaluación del agente: ${reportContext.agentName} | ${reportContext.evaluatorName}`
+    `Evaluación del agente: ${reportContext.agentName} | ${evaluatorDisplayName(reportContext)}`
   );
 
-  doc.save(`evaluacion_agente_${formatDateES(evaluationDate).replace(/ /g, "_")}.pdf`);
+  doc.save(
+    withPrefix(
+      fileNamePrefix,
+      `evaluacion_agente_${formatDateES(evaluationDate).replace(/ /g, "_")}.pdf`
+    )
+  );
 }

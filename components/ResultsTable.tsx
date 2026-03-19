@@ -7,6 +7,7 @@ interface ResultsTableProps {
   results: EvaluationResult[];
   modelLabel?: string;
   temperature?: number;
+  fileNameBase?: string;
 }
 
 function scoreColor(score: number): string {
@@ -95,6 +96,7 @@ export default function ResultsTable({
   results,
   modelLabel,
   temperature,
+  fileNameBase,
 }: ResultsTableProps) {
   const enriched = buildEnrichedRows(rows, results);
 
@@ -138,7 +140,8 @@ export default function ResultsTable({
           onClick={() => {
             const safeModel = (modelLabel || "modelo").replace(/[^a-zA-Z0-9._-]/g, "");
             const safeTemp = temperature !== undefined ? String(temperature) : "default";
-            const fileName = `evaluaciones_${safeModel}_${safeTemp}.csv`;
+            const safeDataset = (fileNameBase || "dataset").replace(/[^a-zA-Z0-9._-]/g, "_");
+            const fileName = `evaluaciones_${safeDataset}_${safeModel}_${safeTemp}.csv`;
             downloadCsv(enriched, fileName);
           }}
           className="px-4 py-2 bg-[#165185] text-white text-sm rounded-lg hover:bg-[#0e3d66] transition-colors flex items-center gap-2"

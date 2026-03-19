@@ -12,11 +12,13 @@ import MetaEvaluationPanel from "@/components/MetaEvaluationPanel";
 import AgentComparisonPanel from "@/components/AgentComparisonPanel";
 import html2canvas from "html2canvas";
 import {
-  EvaluationRow,
+  DatasetEvaluationState,
+  EvaluationDataset,
   EvaluationResult,
   LLMConfig,
   QuestionConsistency,
   AgentReportContext,
+  UploadedCsvDataset,
 } from "@/lib/types";
 import {
   generateSingleEvaluatorPdf,
@@ -36,6 +38,8 @@ type AppState =
   | "results";
 
 const REPORT_CONTEXT_STORAGE_KEY = "agentReportContext";
+const SHARED_LLM_CONFIG_STORAGE_KEY = "sharedLlmConfig";
+const SHARED_META_ENABLED_STORAGE_KEY = "sharedMetaEnabled";
 
 type ScoreField = "accuracy" | "completeness" | "relevance" | "coherence" | "clarity" | "usefulness" | "overallScore";
 
@@ -56,6 +60,49 @@ function llmLabel(config: LLMConfig): string {
 function avg(vals: number[]): number {
   if (vals.length === 0) return 0;
   return Math.round((vals.reduce((s, v) => s + v, 0) / vals.length) * 10) / 10;
+}
+
+function generateId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return Math.random().toString(36).slice(2, 10);
+}
+
+function createDefaultLlmConfig(): LLMConfig {
+  return {
+    id: generateId(),
+    model: "gpt-4o-mini",
+    temperature: 0.2,
+    topP: 1,
+  };
+}
+
+function createIdleEvaluationState(): DatasetEvaluationState {
+  return {
+    status: "idle",
+    llmConfigs: [],
+    metaEnabled: false,
+    allResults: {},
+    allProgress: {},
+    completedLlms: [],
+    activeTab: "overview",
+    consistency: null,
+    metaAnalysis: null,
+    metaRecommendations: [],
+    metaAnalyzing: false,
+    error: "",
+  };
+}
+
+function sanitizeBaseName(fileName: string): string {
+  const withoutExt = fileName.replace(/\.[^/.]+$/, "");
+  const normalized = withoutExt.replace(/[^a-zA-Z0-9._-]/g, "_");
+  return normalized || "dataset";
+}
+
+function cloneConfigs(configs: LLMConfig[]): LLMConfig[] {
+  return configs.map((config) => ({ ...config }));
 }
 
 function buildPanoramaSummary(
@@ -128,43 +175,25 @@ export default function Home() {
   const [reportContext, setReportContext] = useState<AgentReportContext | null>(
     null
   );
-  const [rows, setRows] = useState<EvaluationRow[]>([]);
-
-  const [llmConfigs, setLlmConfigs] = useState<LLMConfig[]>([]);
-  const [metaEnabled, setMetaEnabled] = useState(false);
-
-  const [allResults, setAllResults] = useState<
-    Record<string, EvaluationResult[]>
-  >({});
-  const [allProgress, setAllProgress] = useState<
-    Record<string, { current: number; total: number }>
-  >({});
-  const [completedLlms, setCompletedLlms] = useState<Set<string>>(new Set());
-
-  const [activeTab, setActiveTab] = useState<string>("");
-  const [consistency, setConsistency] = useState<QuestionConsistency[] | null>(
-    null
-  );
-  const [metaAnalysis, setMetaAnalysis] = useState<string | null>(null);
-  const [metaRecommendations, setMetaRecommendations] = useState<string[]>([]);
-  const [metaAnalyzing, setMetaAnalyzing] = useState(false);
+  const [sharedLlmConfigs, setSharedLlmConfigs] = useState<LLMConfig[]>([
+    createDefaultLlmConfig(),
+  ]);
+  const [sharedMetaEnabled, setSharedMetaEnabled] = useState(false);
+  const [datasets, setDatasets] = useState<EvaluationDataset[]>([]);
+  const [activeDatasetId, setActiveDatasetId] = useState<string>("");
 
   const [error, setError] = useState("");
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const [infographicGenerating, setInfographicGenerating] = useState(false);
 
   const chartRefsMap = useRef<Record<string, ScoreChartsHandle | null>>({});
-  const overviewPanelRef = useRef<HTMLDivElement | null>(null);
   const overviewChartsCaptureRef = useRef<HTMLDivElement | null>(null);
-  const metaPanelRef = useRef<HTMLDivElement | null>(null);
-  const allResultsRef = useRef(allResults);
-  allResultsRef.current = allResults;
-  const completedLlmsRef = useRef(completedLlms);
-  completedLlmsRef.current = completedLlms;
 
   useEffect(() => {
     const saved = sessionStorage.getItem("accessKey");
     const savedContext = sessionStorage.getItem(REPORT_CONTEXT_STORAGE_KEY);
+    const savedLlm = sessionStorage.getItem(SHARED_LLM_CONFIG_STORAGE_KEY);
+    const savedMeta = sessionStorage.getItem(SHARED_META_ENABLED_STORAGE_KEY);
     if (saved) {
       setAccessKey(saved);
       if (savedContext) {
@@ -173,6 +202,19 @@ export default function Home() {
       } else {
         setState("context");
       }
+    }
+    if (savedLlm) {
+      try {
+        const parsed = JSON.parse(savedLlm) as LLMConfig[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setSharedLlmConfigs(parsed);
+        }
+      } catch {
+        // ignore invalid cached value
+      }
+    }
+    if (savedMeta) {
+      setSharedMetaEnabled(savedMeta === "true");
     }
   }, []);
 
@@ -187,22 +229,91 @@ export default function Home() {
     setState("upload");
   };
 
-  const handleUpload = (parsedRows: EvaluationRow[]) => {
-    setRows(parsedRows);
-    setAllResults({});
-    setAllProgress({});
-    setCompletedLlms(new Set());
-    setConsistency(null);
-    setMetaAnalysis(null);
-    setMetaRecommendations([]);
+  const handleUpload = (parsedDatasets: UploadedCsvDataset[]) => {
+    const mapped: EvaluationDataset[] = parsedDatasets.map((dataset) => ({
+      id: dataset.id,
+      fileName: dataset.fileName,
+      rows: dataset.rows,
+      useSharedContext: true,
+      contextOverride: null,
+      useSharedLlmConfig: true,
+      llmConfigsOverride: null,
+      metaEnabledOverride: null,
+      evaluation: createIdleEvaluationState(),
+    }));
+    setDatasets(mapped);
+    setActiveDatasetId(mapped[0]?.id ?? "");
     setError("");
     setState("configure");
   };
 
+  const activeDataset = datasets.find((dataset) => dataset.id === activeDatasetId) ?? null;
+
+  const setDatasetEvaluation = useCallback(
+    (
+      datasetId: string,
+      updater: (evaluation: DatasetEvaluationState) => DatasetEvaluationState
+    ) => {
+      setDatasets((prev) =>
+        prev.map((dataset) =>
+          dataset.id === datasetId
+            ? {
+                ...dataset,
+                evaluation: updater(dataset.evaluation),
+              }
+            : dataset
+        )
+      );
+    },
+    []
+  );
+
+  const setDatasetField = useCallback(
+    <K extends keyof EvaluationDataset>(
+      datasetId: string,
+      field: K,
+      value: EvaluationDataset[K]
+    ) => {
+      setDatasets((prev) =>
+        prev.map((dataset) =>
+          dataset.id === datasetId ? { ...dataset, [field]: value } : dataset
+        )
+      );
+    },
+    []
+  );
+
+  const resolveReportContext = useCallback(
+    (dataset: EvaluationDataset): AgentReportContext | null => {
+      if (!dataset.useSharedContext) {
+        if (dataset.contextOverride) return dataset.contextOverride;
+      }
+      return reportContext;
+    },
+    [reportContext]
+  );
+
+  const resolveConfigsForDataset = useCallback(
+    (dataset: EvaluationDataset): { configs: LLMConfig[]; metaEnabled: boolean } => {
+      if (!dataset.useSharedLlmConfig && dataset.llmConfigsOverride?.length) {
+        return {
+          configs: cloneConfigs(dataset.llmConfigsOverride),
+          metaEnabled: Boolean(dataset.metaEnabledOverride),
+        };
+      }
+      return {
+        configs: cloneConfigs(sharedLlmConfigs),
+        metaEnabled: sharedMetaEnabled,
+      };
+    },
+    [sharedLlmConfigs, sharedMetaEnabled]
+  );
+
   const streamBatch = useCallback(
     async (
+      datasetId: string,
       config: LLMConfig,
-      batchRows: EvaluationRow[],
+      batchRows: EvaluationDataset["rows"],
       indexOffset: number,
       collected: EvaluationResult[],
       totalRows: number
@@ -233,10 +344,10 @@ export default function Home() {
 
       if (!response.ok) {
         const errData = await response.json();
-        setError(
-          (prev) =>
-            `${prev ? prev + "\n" : ""}${llmLabel(config)}: ${errData.error || "Error"}`
-        );
+        setDatasetEvaluation(datasetId, (evaluation) => ({
+          ...evaluation,
+          error: `${evaluation.error ? `${evaluation.error}\n` : ""}${llmLabel(config)}: ${errData.error || "Error"}`,
+        }));
         return false;
       }
 
@@ -258,13 +369,16 @@ export default function Home() {
               const result: EvaluationResult = JSON.parse(line);
               result.index = result.index + indexOffset;
               collected.push(result);
-              setAllResults((prev) => ({
-                ...prev,
-                [config.id]: [...collected],
-              }));
-              setAllProgress((prev) => ({
-                ...prev,
-                [config.id]: { current: collected.length, total: totalRows },
+              setDatasetEvaluation(datasetId, (evaluation) => ({
+                ...evaluation,
+                allResults: {
+                  ...evaluation.allResults,
+                  [config.id]: [...collected],
+                },
+                allProgress: {
+                  ...evaluation.allProgress,
+                  [config.id]: { current: collected.length, total: totalRows },
+                },
               }));
             } catch {
               // skip malformed
@@ -278,9 +392,12 @@ export default function Home() {
           const result: EvaluationResult = JSON.parse(buffer);
           result.index = result.index + indexOffset;
           collected.push(result);
-          setAllResults((prev) => ({
-            ...prev,
-            [config.id]: [...collected],
+          setDatasetEvaluation(datasetId, (evaluation) => ({
+            ...evaluation,
+            allResults: {
+              ...evaluation.allResults,
+              [config.id]: [...collected],
+            },
           }));
         } catch {
           // skip
@@ -289,62 +406,86 @@ export default function Home() {
 
       return true;
     },
-    [accessKey]
+    [accessKey, setDatasetEvaluation]
   );
 
   const BATCH_SIZE = 10;
 
   const streamEvaluation = useCallback(
-    async (config: LLMConfig, evalRows: EvaluationRow[]) => {
+    async (
+      datasetId: string,
+      config: LLMConfig,
+      evalRows: EvaluationDataset["rows"]
+    ) => {
       const collected: EvaluationResult[] = [];
       try {
         for (let offset = 0; offset < evalRows.length; offset += BATCH_SIZE) {
           const batch = evalRows.slice(offset, offset + BATCH_SIZE);
-          const ok = await streamBatch(config, batch, offset, collected, evalRows.length);
+          const ok = await streamBatch(
+            datasetId,
+            config,
+            batch,
+            offset,
+            collected,
+            evalRows.length
+          );
           if (!ok) return undefined;
         }
         return collected;
       } catch (err) {
-        setError(
-          (prev) =>
-            `${prev ? prev + "\n" : ""}${llmLabel(config)}: ${err instanceof Error ? err.message : "Error"}`
-        );
+        setDatasetEvaluation(datasetId, (evaluation) => ({
+          ...evaluation,
+          error: `${evaluation.error ? `${evaluation.error}\n` : ""}${llmLabel(config)}: ${err instanceof Error ? err.message : "Error"}`,
+        }));
         return undefined;
       }
     },
-    [streamBatch]
+    [setDatasetEvaluation, streamBatch]
   );
 
   const handleStartEvaluation = async (
     configs: LLMConfig[],
     meta: boolean
   ) => {
-    setLlmConfigs(configs);
-    setMetaEnabled(meta);
-    setAllResults({});
-    setAllProgress({});
-    setCompletedLlms(new Set());
-    setConsistency(null);
-    setMetaAnalysis(null);
-    setMetaRecommendations([]);
-    setMetaAnalyzing(false);
-    setError("");
-    setState("evaluating");
-    setActiveTab("overview");
+    if (!activeDataset) return;
+
+    if (activeDataset.useSharedLlmConfig) {
+      const sharedClone = cloneConfigs(configs);
+      setSharedLlmConfigs(sharedClone);
+      setSharedMetaEnabled(meta);
+      sessionStorage.setItem(SHARED_LLM_CONFIG_STORAGE_KEY, JSON.stringify(sharedClone));
+      sessionStorage.setItem(SHARED_META_ENABLED_STORAGE_KEY, String(meta));
+      setDatasetField(activeDataset.id, "llmConfigsOverride", null);
+      setDatasetField(activeDataset.id, "metaEnabledOverride", null);
+    } else {
+      setDatasetField(activeDataset.id, "llmConfigsOverride", cloneConfigs(configs));
+      setDatasetField(activeDataset.id, "metaEnabledOverride", meta);
+    }
 
     const initProgress: Record<string, { current: number; total: number }> = {};
-    configs.forEach((c) => {
-      initProgress[c.id] = { current: 0, total: rows.length };
+    configs.forEach((config) => {
+      initProgress[config.id] = { current: 0, total: activeDataset.rows.length };
     });
-    setAllProgress(initProgress);
+
+    setDatasetEvaluation(activeDataset.id, () => ({
+      ...createIdleEvaluationState(),
+      status: "evaluating",
+      llmConfigs: cloneConfigs(configs),
+      metaEnabled: meta,
+      allProgress: initProgress,
+      activeTab: "overview",
+    }));
+    setError("");
+    setState("evaluating");
 
     const promises = configs.map(async (config) => {
-      const collected = await streamEvaluation(config, rows);
-      setCompletedLlms((prev) => {
-        const next = new Set(prev);
-        next.add(config.id);
-        return next;
-      });
+      const collected = await streamEvaluation(activeDataset.id, config, activeDataset.rows);
+      setDatasetEvaluation(activeDataset.id, (evaluation) => ({
+        ...evaluation,
+        completedLlms: evaluation.completedLlms.includes(config.id)
+          ? evaluation.completedLlms
+          : [...evaluation.completedLlms, config.id],
+      }));
       return { id: config.id, results: collected };
     });
 
@@ -355,13 +496,21 @@ export default function Home() {
       if (results) finalResults[id] = results;
     });
 
+    setDatasetEvaluation(activeDataset.id, (evaluation) => ({
+      ...evaluation,
+      status: "done",
+      allResults: finalResults,
+      activeTab: "overview",
+    }));
     setState("results");
 
     if (meta && Object.keys(finalResults).length > 1) {
-      const consistencyData = computeConsistency(rows, finalResults);
-      setConsistency(consistencyData);
-
-      setMetaAnalyzing(true);
+      const consistencyData = computeConsistency(activeDataset.rows, finalResults);
+      setDatasetEvaluation(activeDataset.id, (evaluation) => ({
+        ...evaluation,
+        consistency: consistencyData,
+        metaAnalyzing: true,
+      }));
       try {
         const summary = buildPanoramaSummary(configs, finalResults, consistencyData);
         const response = await fetch("/api/meta-analyze", {
@@ -375,39 +524,48 @@ export default function Home() {
 
         if (response.ok) {
           const data = await response.json();
-          setMetaAnalysis(data.analysis ?? null);
-          setMetaRecommendations(
-            Array.isArray(data.recommendations)
-              ? data.recommendations.map((item: unknown) => String(item)).filter(Boolean)
-              : []
-          );
+          const recommendations = Array.isArray(data.recommendations)
+            ? data.recommendations.map((item: unknown) => String(item)).filter(Boolean)
+            : [];
+          setDatasetEvaluation(activeDataset.id, (evaluation) => ({
+            ...evaluation,
+            metaAnalysis: data.analysis ?? null,
+            metaRecommendations: recommendations,
+          }));
         }
       } catch {
         // meta-analysis is optional; don't block results
       } finally {
-        setMetaAnalyzing(false);
+        setDatasetEvaluation(activeDataset.id, (evaluation) => ({
+          ...evaluation,
+          metaAnalyzing: false,
+        }));
       }
     }
   };
 
   const handleDownloadPdf = async () => {
-    if (!reportContext) return;
-    if (activeTab === "meta" || activeTab === "overview" || !activeTab) return;
-    const config = llmConfigs.find((c) => c.id === activeTab);
+    if (!activeDataset) return;
+    const resolvedContext = resolveReportContext(activeDataset);
+    if (!resolvedContext) return;
+    const { evaluation } = activeDataset;
+    if (evaluation.activeTab === "meta" || evaluation.activeTab === "overview" || !evaluation.activeTab) return;
+    const config = evaluation.llmConfigs.find((c) => c.id === evaluation.activeTab);
     if (!config) return;
-    const results = allResults[config.id] || [];
+    const results = evaluation.allResults[config.id] || [];
     if (results.length === 0) return;
 
     setPdfGenerating(true);
     try {
-      const handle = chartRefsMap.current[config.id];
+      const handle = chartRefsMap.current[`${activeDataset.id}:${config.id}`];
       const container = handle?.getChartsContainer() ?? null;
       await generateSingleEvaluatorPdf({
-        reportContext,
+        reportContext: resolvedContext,
         config,
-        rows,
+        rows: activeDataset.rows,
         results,
         chartsContainer: container,
+        fileNamePrefix: sanitizeBaseName(activeDataset.fileName),
       });
     } finally {
       setPdfGenerating(false);
@@ -415,25 +573,30 @@ export default function Home() {
   };
 
   const handleDownloadAllPdf = async () => {
-    if (!reportContext) return;
+    if (!activeDataset) return;
+    const resolvedContext = resolveReportContext(activeDataset);
+    if (!resolvedContext) return;
     setPdfGenerating(true);
     try {
       const containers: Record<string, HTMLDivElement | null> = {};
-      for (const config of llmConfigs) {
-        const handle = chartRefsMap.current[config.id];
+      for (const config of activeDataset.evaluation.llmConfigs) {
+        const handle = chartRefsMap.current[`${activeDataset.id}:${config.id}`];
         containers[config.id] = handle?.getChartsContainer() ?? null;
       }
       await generateAllEvaluatorsPdf({
-        reportContext,
-        configs: llmConfigs,
-        rows,
-        allResults,
+        reportContext: resolvedContext,
+        configs: activeDataset.evaluation.llmConfigs,
+        rows: activeDataset.rows,
+        allResults: activeDataset.evaluation.allResults,
         chartsContainers: containers,
         overviewChartsContainer: overviewChartsCaptureRef.current,
-        includeMetaSection: Boolean(metaEnabled && consistency),
-        consistency,
-        metaAnalysis,
-        recommendations: metaRecommendations,
+        includeMetaSection: Boolean(
+          activeDataset.evaluation.metaEnabled && activeDataset.evaluation.consistency
+        ),
+        consistency: activeDataset.evaluation.consistency,
+        metaAnalysis: activeDataset.evaluation.metaAnalysis,
+        recommendations: activeDataset.evaluation.metaRecommendations,
+        fileNamePrefix: sanitizeBaseName(activeDataset.fileName),
       });
     } finally {
       setPdfGenerating(false);
@@ -441,13 +604,16 @@ export default function Home() {
   };
 
   const handleDownloadOverviewSlidesPdf = async () => {
-    if (!reportContext || llmConfigs.length === 0) return;
+    if (!activeDataset) return;
+    const resolvedContext = resolveReportContext(activeDataset);
+    if (!resolvedContext || activeDataset.evaluation.llmConfigs.length === 0) return;
     setPdfGenerating(true);
     try {
       await generateOverviewSlidesPdf({
-        reportContext,
-        configs: llmConfigs,
-        allResults,
+        reportContext: resolvedContext,
+        configs: activeDataset.evaluation.llmConfigs,
+        allResults: activeDataset.evaluation.allResults,
+        fileNamePrefix: sanitizeBaseName(activeDataset.fileName),
       });
     } finally {
       setPdfGenerating(false);
@@ -455,7 +621,9 @@ export default function Home() {
   };
 
   const handleDownloadTex = async () => {
-    if (!reportContext) return;
+    if (!activeDataset) return;
+    const resolvedContext = resolveReportContext(activeDataset);
+    if (!resolvedContext) return;
     setPdfGenerating(true);
     try {
       let panoramaImages:
@@ -478,14 +646,15 @@ export default function Home() {
         ];
       }
       downloadTexFile({
-        reportContext,
-        configs: llmConfigs,
-        rows,
-        allResults,
-        consistency,
-        metaAnalysis,
-        recommendations: metaRecommendations,
+        reportContext: resolvedContext,
+        configs: activeDataset.evaluation.llmConfigs,
+        rows: activeDataset.rows,
+        allResults: activeDataset.evaluation.allResults,
+        consistency: activeDataset.evaluation.consistency,
+        metaAnalysis: activeDataset.evaluation.metaAnalysis,
+        recommendations: activeDataset.evaluation.metaRecommendations,
         panoramaImages,
+        fileNamePrefix: sanitizeBaseName(activeDataset.fileName),
       });
     } finally {
       setPdfGenerating(false);
@@ -493,7 +662,9 @@ export default function Home() {
   };
 
   const handleDownloadInfographic = async () => {
-    if (!reportContext) return;
+    if (!activeDataset) return;
+    const resolvedContext = resolveReportContext(activeDataset);
+    if (!resolvedContext) return;
     setInfographicGenerating(true);
     try {
       let panoramaChartDataUrl: string | undefined;
@@ -509,12 +680,12 @@ export default function Home() {
       }
 
       const payload = buildInfographicPayload({
-        reportContext,
-        configs: llmConfigs,
-        rows,
-        allResults,
-        metaAnalysis,
-        recommendations: metaRecommendations,
+        reportContext: resolvedContext,
+        configs: activeDataset.evaluation.llmConfigs,
+        rows: activeDataset.rows,
+        allResults: activeDataset.evaluation.allResults,
+        metaAnalysis: activeDataset.evaluation.metaAnalysis,
+        recommendations: activeDataset.evaluation.metaRecommendations,
         panoramaChartDataUrl,
       });
 
@@ -584,7 +755,7 @@ export default function Home() {
       const url = URL.createObjectURL(finalBlob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `infografia_${Date.now()}.png`;
+      anchor.download = `infografia_${sanitizeBaseName(activeDataset.fileName)}_${Date.now()}.png`;
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
@@ -595,13 +766,8 @@ export default function Home() {
   };
 
   const handleReset = () => {
-    setRows([]);
-    setAllResults({});
-    setAllProgress({});
-    setCompletedLlms(new Set());
-    setConsistency(null);
-    setMetaAnalysis(null);
-    setMetaRecommendations([]);
+    setDatasets([]);
+    setActiveDatasetId("");
     setError("");
     setState("upload");
   };
@@ -655,7 +821,8 @@ export default function Home() {
     );
   }
 
-  const totalProgress = Object.values(allProgress).reduce(
+  const activeEvaluation = activeDataset?.evaluation ?? null;
+  const totalProgress = Object.values(activeEvaluation?.allProgress ?? {}).reduce(
     (acc, p) => ({ current: acc.current + p.current, total: acc.total + p.total }),
     { current: 0, total: 0 }
   );
@@ -717,9 +884,9 @@ export default function Home() {
         {state === "upload" && (
           <div className="space-y-6">
             <div className="text-center">
-              <h2 className="text-xl font-medium">Sube tu archivo CSV</h2>
+              <h2 className="text-xl font-medium">Sube tus archivos CSV</h2>
               <p className="text-sm text-gray-500 mt-1">
-                El archivo debe contener las columnas: question,
+                Cada archivo debe contener las columnas: question,
                 expectedResponse, actualResponse
               </p>
             </div>
@@ -727,20 +894,108 @@ export default function Home() {
           </div>
         )}
 
-        {state === "configure" && (
-          <LLMConfigurator
-            onStart={handleStartEvaluation}
-            disabled={false}
-          />
+        {state === "configure" && activeDataset && (
+          <div className="space-y-6">
+            <div className="flex gap-1 border-b border-gray-200 overflow-x-auto">
+              {datasets.map((dataset) => (
+                <button
+                  key={dataset.id}
+                  onClick={() => setActiveDatasetId(dataset.id)}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                    activeDatasetId === dataset.id
+                      ? "border-[#165185] text-[#165185]"
+                      : "border-transparent text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  {dataset.fileName}
+                </button>
+              ))}
+            </div>
+
+            <div className="border border-gray-200 rounded-lg bg-white p-5 space-y-4">
+              <h3 className="text-sm font-semibold text-gray-700">
+                Contexto del reporte para este CSV
+              </h3>
+              <label className="flex items-center gap-2 text-sm text-gray-600">
+                <input
+                  type="checkbox"
+                  checked={activeDataset.useSharedContext}
+                  onChange={(e) => {
+                    setDatasetField(
+                      activeDataset.id,
+                      "useSharedContext",
+                      e.target.checked
+                    );
+                  }}
+                  className="h-4 w-4 accent-gray-900"
+                />
+                Usar contexto compartido
+              </label>
+              {activeDataset.useSharedContext ? (
+                <p className="text-xs text-gray-500">
+                  Se usarán los datos generales del evaluador/agente para{" "}
+                  <span className="font-medium">{activeDataset.fileName}</span>.
+                </p>
+              ) : (
+                <AgentContextForm
+                  initialValue={activeDataset.contextOverride ?? reportContext}
+                  onSubmit={(context) => {
+                    setDatasetField(activeDataset.id, "contextOverride", context);
+                  }}
+                  submitLabel={`Guardar contexto para ${activeDataset.fileName}`}
+                  title={`Contexto para ${activeDataset.fileName}`}
+                  description="Esta configuración solo aplica a este CSV."
+                />
+              )}
+            </div>
+
+            <div className="border border-gray-200 rounded-lg bg-white p-5 space-y-4">
+              <h3 className="text-sm font-semibold text-gray-700">
+                Configuración de evaluadores para este CSV
+              </h3>
+              <label className="flex items-center gap-2 text-sm text-gray-600">
+                <input
+                  type="checkbox"
+                  checked={activeDataset.useSharedLlmConfig}
+                  onChange={(e) => {
+                    setDatasetField(
+                      activeDataset.id,
+                      "useSharedLlmConfig",
+                      e.target.checked
+                    );
+                  }}
+                  className="h-4 w-4 accent-gray-900"
+                />
+                Usar configuración compartida de evaluadores
+              </label>
+            </div>
+
+            <LLMConfigurator
+              key={`${activeDataset.id}-${activeDataset.useSharedLlmConfig ? "shared" : "override"}`}
+              initialConfigs={
+                activeDataset.useSharedLlmConfig
+                  ? sharedLlmConfigs
+                  : activeDataset.llmConfigsOverride ?? sharedLlmConfigs
+              }
+              initialMetaEnabled={
+                activeDataset.useSharedLlmConfig
+                  ? sharedMetaEnabled
+                  : Boolean(activeDataset.metaEnabledOverride)
+              }
+              onStart={handleStartEvaluation}
+              disabled={false}
+              startLabel={`Evaluar ${activeDataset.fileName}`}
+            />
+          </div>
         )}
 
-        {state === "evaluating" && (
+        {state === "evaluating" && activeDataset && activeEvaluation && (
           <div className="space-y-8">
             <div className="text-center">
               <h2 className="text-xl font-medium">Evaluando respuestas...</h2>
               <p className="text-sm text-gray-500 mt-1">
-                {llmConfigs.length} evaluador{llmConfigs.length !== 1 ? "es" : ""}{" "}
-                corriendo en paralelo
+                {activeDataset.fileName} - {activeEvaluation.llmConfigs.length} evaluador
+                {activeEvaluation.llmConfigs.length !== 1 ? "es" : ""} corriendo en paralelo
               </p>
             </div>
 
@@ -750,9 +1005,12 @@ export default function Home() {
             />
 
             <div className="space-y-2">
-              {llmConfigs.map((config) => {
-                const p = allProgress[config.id] || { current: 0, total: rows.length };
-                const done = completedLlms.has(config.id);
+              {activeEvaluation.llmConfigs.map((config) => {
+                const p = activeEvaluation.allProgress[config.id] || {
+                  current: 0,
+                  total: activeDataset.rows.length,
+                };
+                const done = activeEvaluation.completedLlms.includes(config.id);
                 return (
                   <div
                     key={config.id}
@@ -776,15 +1034,20 @@ export default function Home() {
               })}
             </div>
 
-            {Object.keys(allResults).length > 0 && (
+            {Object.keys(activeEvaluation.allResults).length > 0 && (
               <div>
                 <div className="flex gap-1 border-b border-gray-200 mb-4">
-                  {llmConfigs.map((config) => (
+                  {activeEvaluation.llmConfigs.map((config) => (
                     <button
                       key={config.id}
-                      onClick={() => setActiveTab(config.id)}
+                      onClick={() =>
+                        setDatasetEvaluation(activeDataset.id, (evaluation) => ({
+                          ...evaluation,
+                          activeTab: config.id,
+                        }))
+                      }
                       className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                        activeTab === config.id
+                        activeEvaluation.activeTab === config.id
                           ? "border-[#165185] text-[#165185]"
                           : "border-transparent text-gray-500 hover:text-gray-700"
                       }`}
@@ -794,18 +1057,19 @@ export default function Home() {
                   ))}
                 </div>
 
-                {llmConfigs.map((config) => {
-                  if (config.id !== activeTab) return null;
-                  const results = allResults[config.id] || [];
+                {activeEvaluation.llmConfigs.map((config) => {
+                  if (config.id !== activeEvaluation.activeTab) return null;
+                  const results = activeEvaluation.allResults[config.id] || [];
                   if (results.length === 0) return null;
                   return (
                     <div key={config.id} className="space-y-6">
                       <ScoreCharts results={results} />
                       <ResultsTable
-                        rows={rows}
+                        rows={activeDataset.rows}
                         results={results}
                         modelLabel={config.model}
                         temperature={config.temperature}
+                        fileNameBase={sanitizeBaseName(activeDataset.fileName)}
                       />
                     </div>
                   );
@@ -815,24 +1079,53 @@ export default function Home() {
           </div>
         )}
 
-        {state === "results" && (
+        {state === "results" && activeDataset && (
           <div className="space-y-6">
+            <div className="flex gap-1 border-b border-gray-200 overflow-x-auto">
+              {datasets.map((dataset) => (
+                <button
+                  key={dataset.id}
+                  onClick={() => setActiveDatasetId(dataset.id)}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                    activeDatasetId === dataset.id
+                      ? "border-[#165185] text-[#165185]"
+                      : "border-transparent text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  {dataset.fileName}
+                </button>
+              ))}
+            </div>
+
             <div className="text-center">
               <h2 className="text-xl font-medium">Evaluación completada</h2>
               <p className="text-sm text-gray-500 mt-1">
-                {rows.length} respuestas evaluadas por {llmConfigs.length}{" "}
-                evaluador{llmConfigs.length !== 1 ? "es" : ""}
+                {activeDataset.rows.length} respuestas en {activeDataset.fileName}
               </p>
             </div>
 
-            <div className="flex justify-center gap-3">
+            {activeDataset.evaluation.status !== "done" ? (
+              <div className="border border-gray-200 rounded-lg bg-white p-6 text-center">
+                <p className="text-sm text-gray-600 mb-4">
+                  Este CSV aún no ha sido evaluado.
+                </p>
+                <button
+                  onClick={() => setState("configure")}
+                  className="px-4 py-2 bg-[#165185] text-white text-sm rounded-lg hover:bg-[#0e3d66] transition-colors"
+                >
+                  Configurar y evaluar este CSV
+                </button>
+              </div>
+            ) : (
+              <>
+            <div className="flex justify-center gap-3 flex-wrap">
               <button
                 onClick={handleDownloadPdf}
                 disabled={
                   pdfGenerating ||
                   infographicGenerating ||
-                  activeTab === "meta" ||
-                  activeTab === "overview"
+                  activeDataset.evaluation.activeTab === "meta" ||
+                  activeDataset.evaluation.activeTab === "overview"
                 }
                 className="px-4 py-2 bg-[#165185] text-white text-sm rounded-lg hover:bg-[#0e3d66] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
@@ -899,24 +1192,43 @@ export default function Home() {
               </button>
             </div>
 
+            <div className="text-center">
+              <button
+                onClick={() => setState("configure")}
+                className="text-sm text-[#165185] hover:underline"
+              >
+                Reconfigurar/Reevaluar este CSV
+              </button>
+            </div>
+
             <div>
               <div className="flex gap-1 border-b border-gray-200 mb-6 overflow-x-auto">
                 <button
-                  onClick={() => setActiveTab("overview")}
+                  onClick={() =>
+                    setDatasetEvaluation(activeDataset.id, (evaluation) => ({
+                      ...evaluation,
+                      activeTab: "overview",
+                    }))
+                  }
                   className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-                    activeTab === "overview"
+                    activeDataset.evaluation.activeTab === "overview"
                       ? "border-[#165185] text-[#165185]"
                       : "border-transparent text-gray-500 hover:text-gray-700"
                   }`}
                 >
                   Panorama General
                 </button>
-                {llmConfigs.map((config) => (
+                {activeDataset.evaluation.llmConfigs.map((config) => (
                   <button
                     key={config.id}
-                    onClick={() => setActiveTab(config.id)}
+                    onClick={() =>
+                      setDatasetEvaluation(activeDataset.id, (evaluation) => ({
+                        ...evaluation,
+                        activeTab: config.id,
+                      }))
+                    }
                     className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-                      activeTab === config.id
+                      activeDataset.evaluation.activeTab === config.id
                         ? "border-[#165185] text-[#165185]"
                         : "border-transparent text-gray-500 hover:text-gray-700"
                     }`}
@@ -924,11 +1236,17 @@ export default function Home() {
                     {llmLabel(config)}
                   </button>
                 ))}
-                {metaEnabled && consistency && (
+                {activeDataset.evaluation.metaEnabled &&
+                  activeDataset.evaluation.consistency && (
                   <button
-                    onClick={() => setActiveTab("meta")}
+                    onClick={() =>
+                      setDatasetEvaluation(activeDataset.id, (evaluation) => ({
+                        ...evaluation,
+                        activeTab: "meta",
+                      }))
+                    }
                     className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-                      activeTab === "meta"
+                      activeDataset.evaluation.activeTab === "meta"
                         ? "border-[#165185] text-[#165185]"
                         : "border-transparent text-gray-500 hover:text-gray-700"
                     }`}
@@ -938,43 +1256,44 @@ export default function Home() {
                 )}
               </div>
 
-              {activeTab === "overview" ? (
-                <div ref={overviewPanelRef}>
+              {activeDataset.evaluation.activeTab === "overview" ? (
+                <div>
                   <AgentComparisonPanel
-                    configs={llmConfigs}
-                    allResults={allResults}
+                    configs={activeDataset.evaluation.llmConfigs}
+                    allResults={activeDataset.evaluation.allResults}
                   />
                 </div>
-              ) : activeTab === "meta" ? (
+              ) : activeDataset.evaluation.activeTab === "meta" ? (
                 <div>
-                  {consistency && (
-                    <div ref={metaPanelRef}>
+                  {activeDataset.evaluation.consistency && (
+                    <div>
                       <MetaEvaluationPanel
-                        consistency={consistency}
-                        metaAnalysis={metaAnalysis}
-                        recommendations={metaRecommendations}
-                        metaAnalyzing={metaAnalyzing}
+                        consistency={activeDataset.evaluation.consistency}
+                        metaAnalysis={activeDataset.evaluation.metaAnalysis}
+                        recommendations={activeDataset.evaluation.metaRecommendations}
+                        metaAnalyzing={activeDataset.evaluation.metaAnalyzing}
                       />
                     </div>
                   )}
                 </div>
               ) : (
-                llmConfigs.map((config) => {
-                  if (config.id !== activeTab) return null;
-                  const results = allResults[config.id] || [];
+                activeDataset.evaluation.llmConfigs.map((config) => {
+                  if (config.id !== activeDataset.evaluation.activeTab) return null;
+                  const results = activeDataset.evaluation.allResults[config.id] || [];
                   return (
                     <div key={config.id} className="space-y-6">
                       <ScoreCharts
                         ref={(handle) => {
-                          chartRefsMap.current[config.id] = handle;
+                          chartRefsMap.current[`${activeDataset.id}:${config.id}`] = handle;
                         }}
                         results={results}
                       />
                       <ResultsTable
-                        rows={rows}
+                        rows={activeDataset.rows}
                         results={results}
                         modelLabel={config.model}
                         temperature={config.temperature}
+                        fileNameBase={sanitizeBaseName(activeDataset.fileName)}
                       />
                     </div>
                   );
@@ -986,39 +1305,33 @@ export default function Home() {
             <div className="absolute left-[-9999px] top-0" aria-hidden="true">
               <div ref={overviewChartsCaptureRef} style={{ width: 1200 }}>
                 <AgentComparisonPanel
-                  configs={llmConfigs}
-                  allResults={allResults}
+                  configs={activeDataset.evaluation.llmConfigs}
+                  allResults={activeDataset.evaluation.allResults}
                   hideTables
                 />
               </div>
-              {activeTab !== "overview" && (
-                <div ref={overviewPanelRef} style={{ width: 1200 }}>
-                  <AgentComparisonPanel
-                    configs={llmConfigs}
-                    allResults={allResults}
-                  />
-                </div>
-              )}
-              {metaEnabled && consistency && activeTab !== "meta" && (
-                <div ref={metaPanelRef} style={{ width: 1200 }}>
+              {activeDataset.evaluation.metaEnabled &&
+                activeDataset.evaluation.consistency &&
+                activeDataset.evaluation.activeTab !== "meta" && (
+                <div style={{ width: 1200 }}>
                   <MetaEvaluationPanel
-                    consistency={consistency}
-                    metaAnalysis={metaAnalysis}
-                    recommendations={metaRecommendations}
-                    metaAnalyzing={metaAnalyzing}
+                    consistency={activeDataset.evaluation.consistency}
+                    metaAnalysis={activeDataset.evaluation.metaAnalysis}
+                    recommendations={activeDataset.evaluation.metaRecommendations}
+                    metaAnalyzing={activeDataset.evaluation.metaAnalyzing}
                   />
                 </div>
               )}
-              {llmConfigs
-                .filter((c) => c.id !== activeTab)
+              {activeDataset.evaluation.llmConfigs
+                .filter((c) => c.id !== activeDataset.evaluation.activeTab)
                 .map((config) => {
-                  const results = allResults[config.id] || [];
+                  const results = activeDataset.evaluation.allResults[config.id] || [];
                   if (results.length === 0) return null;
                   return (
                     <div key={config.id} style={{ width: 800 }}>
                       <ScoreCharts
                         ref={(handle) => {
-                          chartRefsMap.current[config.id] = handle;
+                          chartRefsMap.current[`${activeDataset.id}:${config.id}`] = handle;
                         }}
                         results={results}
                       />
@@ -1026,6 +1339,8 @@ export default function Home() {
                   );
                 })}
             </div>
+              </>
+            )}
           </div>
         )}
       </main>

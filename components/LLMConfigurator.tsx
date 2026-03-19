@@ -1,18 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { LLMConfig } from "@/lib/types";
 
 interface LLMConfiguratorProps {
   onStart: (configs: LLMConfig[], metaEnabled: boolean) => void;
   disabled: boolean;
+  initialConfigs?: LLMConfig[];
+  initialMetaEnabled?: boolean;
+  startLabel?: string;
 }
 
 function generateId(): string {
   return Math.random().toString(36).slice(2, 9);
 }
 
-const DEFAULT_CONFIG: () => LLMConfig = () => ({
+export const createDefaultConfig = (): LLMConfig => ({
   id: generateId(),
   model: "gpt-4o-mini",
   temperature: 0.2,
@@ -22,9 +25,29 @@ const DEFAULT_CONFIG: () => LLMConfig = () => ({
 export default function LLMConfigurator({
   onStart,
   disabled,
+  initialConfigs,
+  initialMetaEnabled = false,
+  startLabel,
 }: LLMConfiguratorProps) {
-  const [configs, setConfigs] = useState<LLMConfig[]>([DEFAULT_CONFIG()]);
-  const [metaEnabled, setMetaEnabled] = useState(false);
+  const [configs, setConfigs] = useState<LLMConfig[]>(() => {
+    if (initialConfigs && initialConfigs.length > 0) {
+      return initialConfigs.map((config) => ({ ...config }));
+    }
+    return [createDefaultConfig()];
+  });
+  const [metaEnabled, setMetaEnabled] = useState(initialMetaEnabled);
+
+  useEffect(() => {
+    if (initialConfigs && initialConfigs.length > 0) {
+      setConfigs(initialConfigs.map((config) => ({ ...config })));
+      return;
+    }
+    setConfigs([createDefaultConfig()]);
+  }, [initialConfigs]);
+
+  useEffect(() => {
+    setMetaEnabled(initialMetaEnabled);
+  }, [initialMetaEnabled]);
 
   const updateConfig = (id: string, patch: Partial<LLMConfig>) => {
     setConfigs((prev) =>
@@ -33,7 +56,7 @@ export default function LLMConfigurator({
   };
 
   const addConfig = () => {
-    setConfigs((prev) => [...prev, DEFAULT_CONFIG()]);
+    setConfigs((prev) => [...prev, createDefaultConfig()]);
   };
 
   const removeConfig = (id: string) => {
@@ -225,8 +248,8 @@ export default function LLMConfigurator({
         disabled={disabled || configs.some((c) => !c.model.trim())}
         className="w-full py-3 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        Iniciar evaluación con {configs.length} evaluador
-        {configs.length !== 1 ? "es" : ""}
+        {startLabel ??
+          `Iniciar evaluación con ${configs.length} evaluador${configs.length !== 1 ? "es" : ""}`}
       </button>
     </div>
   );

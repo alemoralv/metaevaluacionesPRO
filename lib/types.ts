@@ -66,3 +66,36 @@ export interface AgentReportContext {
   testPhase: string;
   systemInstructions?: string;
 }
+
+export interface UploadedCsvDataset {
+  id: string;
+  fileName: string;
+  rows: EvaluationRow[];
+}
+
+export interface DatasetEvaluationState {
+  status: "idle" | "evaluating" | "done";
+  llmConfigs: LLMConfig[];
+  metaEnabled: boolean;
+  allResults: Record<string, EvaluationResult[]>;
+  allProgress: Record<string, { current: number; total: number }>;
+  completedLlms: string[];
+  activeTab: string;
+  consistency: QuestionConsistency[] | null;
+  metaAnalysis: string | null;
+  metaRecommendations: string[];
+  metaAnalyzing: boolean;
+  error: string;
+}
+
+export interface EvaluationDataset {
+  id: string;
+  fileName: string;
+  rows: EvaluationRow[];
+  useSharedContext: boolean;
+  contextOverride: AgentReportContext | null;
+  useSharedLlmConfig: boolean;
+  llmConfigsOverride: LLMConfig[] | null;
+  metaEnabledOverride: boolean | null;
+  evaluation: DatasetEvaluationState;
+}
