@@ -1,8 +1,14 @@
 "use client";
 
-import { EvaluationRow, EvaluationResult, EnrichedRow } from "@/lib/types";
+import {
+  EvaluationMode,
+  EvaluationRow,
+  EvaluationResult,
+  EnrichedRow,
+} from "@/lib/types";
 
 interface ResultsTableProps {
+  mode?: EvaluationMode;
   rows: EvaluationRow[];
   results: EvaluationResult[];
   modelLabel?: string;
@@ -92,6 +98,7 @@ const DIM_COLS: { label: string; shortLabel: string; field: keyof EvaluationResu
 ];
 
 export default function ResultsTable({
+  mode = "one-shot",
   rows,
   results,
   modelLabel,
@@ -171,7 +178,7 @@ export default function ResultsTable({
                 #
               </th>
               <th className="px-3 py-3 text-left font-medium text-gray-500">
-                Pregunta
+                {mode === "conversational" ? "Conversación" : "Pregunta"}
               </th>
               {DIM_COLS.map((dim) => (
                 <th key={dim.field} className="px-2 py-3 text-center font-medium text-gray-500 w-14">

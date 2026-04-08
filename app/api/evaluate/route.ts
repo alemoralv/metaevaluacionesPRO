@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { evaluateRow, EvalRowConfig } from "@/lib/openai";
-import { EvaluationRow } from "@/lib/types";
+import { evaluateConversationRow, evaluateRow, EvalRowConfig } from "@/lib/openai";
+import { ConversationEvaluationRow, EvaluationMode, EvaluationRow } from "@/lib/types";
 
 export const maxDuration = 60;
 
 interface EvaluateBody {
+  mode?: EvaluationMode;
   rows: EvaluationRow[];
   llmConfig?: {
     model?: string;
@@ -51,7 +52,11 @@ export async function POST(request: NextRequest) {
     async start(controller) {
       for (let i = 0; i < body.rows.length; i++) {
         try {
-          const result = await evaluateRow(body.rows[i], i, config);
+          const row = body.rows[i];
+          const result =
+            body.mode === "conversational"
+              ? await evaluateConversationRow(row as ConversationEvaluationRow, i, config)
+              : await evaluateRow(row, i, config);
           controller.enqueue(encoder.encode(JSON.stringify(result) + "\n"));
         } catch (err) {
           const errorResult = {

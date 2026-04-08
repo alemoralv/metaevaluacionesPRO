@@ -14,6 +14,7 @@ import html2canvas from "html2canvas";
 import {
   DatasetEvaluationState,
   EvaluationDataset,
+  EvaluationMode,
   EvaluationResult,
   LLMConfig,
   QuestionConsistency,
@@ -38,6 +39,7 @@ type AppState =
   | "results";
 
 const REPORT_CONTEXT_STORAGE_KEY = "agentReportContext";
+const EVALUATION_MODE_STORAGE_KEY = "evaluationMode";
 const SHARED_LLM_CONFIG_STORAGE_KEY = "sharedLlmConfig";
 const SHARED_META_ENABLED_STORAGE_KEY = "sharedMetaEnabled";
 
@@ -103,6 +105,11 @@ function sanitizeBaseName(fileName: string): string {
 
 function cloneConfigs(configs: LLMConfig[]): LLMConfig[] {
   return configs.map((config) => ({ ...config }));
+}
+
+function getEvaluationItemLabel(mode: EvaluationMode, count: number): string {
+  const base = mode === "conversational" ? "conversación" : "respuesta";
+  return `${count} ${base}${count === 1 ? "" : "es"}`;
 }
 
 function buildPanoramaSummary(
@@ -172,6 +179,7 @@ function buildPanoramaSummary(
 export default function Home() {
   const [state, setState] = useState<AppState>("login");
   const [accessKey, setAccessKey] = useState("");
+  const [selectedMode, setSelectedMode] = useState<EvaluationMode | null>(null);
   const [reportContext, setReportContext] = useState<AgentReportContext | null>(
     null
   );
@@ -192,16 +200,18 @@ export default function Home() {
   useEffect(() => {
     const saved = sessionStorage.getItem("accessKey");
     const savedContext = sessionStorage.getItem(REPORT_CONTEXT_STORAGE_KEY);
+    const savedMode = sessionStorage.getItem(EVALUATION_MODE_STORAGE_KEY);
     const savedLlm = sessionStorage.getItem(SHARED_LLM_CONFIG_STORAGE_KEY);
     const savedMeta = sessionStorage.getItem(SHARED_META_ENABLED_STORAGE_KEY);
     if (saved) {
       setAccessKey(saved);
+      if (savedMode === "one-shot" || savedMode === "conversational") {
+        setSelectedMode(savedMode);
+      }
       if (savedContext) {
         setReportContext(JSON.parse(savedContext) as AgentReportContext);
-        setState("upload");
-      } else {
-        setState("context");
       }
+      setState(savedContext && (savedMode === "one-shot" || savedMode === "conversational") ? "upload" : "context");
     }
     if (savedLlm) {
       try {
@@ -223,7 +233,17 @@ export default function Home() {
     setState("context");
   };
 
+  const handleModeSelection = (mode: EvaluationMode) => {
+    setSelectedMode(mode);
+    sessionStorage.setItem(EVALUATION_MODE_STORAGE_KEY, mode);
+    setError("");
+  };
+
   const handleContextSubmit = (context: AgentReportContext) => {
+    if (!selectedMode) {
+      setError("Selecciona un tipo de evaluación para continuar.");
+      return;
+    }
     setReportContext(context);
     sessionStorage.setItem(REPORT_CONTEXT_STORAGE_KEY, JSON.stringify(context));
     setState("upload");
@@ -233,6 +253,7 @@ export default function Home() {
     const mapped: EvaluationDataset[] = parsedDatasets.map((dataset) => ({
       id: dataset.id,
       fileName: dataset.fileName,
+      mode: dataset.mode,
       rows: dataset.rows,
       useSharedContext: true,
       contextOverride: null,
@@ -312,6 +333,7 @@ export default function Home() {
   const streamBatch = useCallback(
     async (
       datasetId: string,
+      mode: EvaluationMode,
       config: LLMConfig,
       batchRows: EvaluationDataset["rows"],
       indexOffset: number,
@@ -325,6 +347,7 @@ export default function Home() {
           "x-access-key": accessKey,
         },
         body: JSON.stringify({
+          mode,
           rows: batchRows,
           llmConfig: {
             model: config.model,
@@ -414,6 +437,7 @@ export default function Home() {
   const streamEvaluation = useCallback(
     async (
       datasetId: string,
+      mode: EvaluationMode,
       config: LLMConfig,
       evalRows: EvaluationDataset["rows"]
     ) => {
@@ -423,6 +447,7 @@ export default function Home() {
           const batch = evalRows.slice(offset, offset + BATCH_SIZE);
           const ok = await streamBatch(
             datasetId,
+            mode,
             config,
             batch,
             offset,
@@ -479,7 +504,12 @@ export default function Home() {
     setState("evaluating");
 
     const promises = configs.map(async (config) => {
-      const collected = await streamEvaluation(activeDataset.id, config, activeDataset.rows);
+      const collected = await streamEvaluation(
+        activeDataset.id,
+        activeDataset.mode,
+        config,
+        activeDataset.rows
+      );
       setDatasetEvaluation(activeDataset.id, (evaluation) => ({
         ...evaluation,
         completedLlms: evaluation.completedLlms.includes(config.id)
@@ -801,7 +831,9 @@ export default function Home() {
               onClick={() => {
                 sessionStorage.removeItem("accessKey");
                 sessionStorage.removeItem(REPORT_CONTEXT_STORAGE_KEY);
+                sessionStorage.removeItem(EVALUATION_MODE_STORAGE_KEY);
                 setAccessKey("");
+                setSelectedMode(null);
                 setReportContext(null);
                 setState("login");
               }}
@@ -812,9 +844,54 @@ export default function Home() {
           </div>
         </header>
         <main className="max-w-7xl mx-auto px-4 sm:px-6 py-10">
+          <div className="max-w-3xl mx-auto mb-8 rounded-xl border border-gray-200 bg-white p-5">
+            <h2 className="text-lg font-semibold text-gray-900">
+              Tipo de evaluación
+            </h2>
+            <p className="mt-1 text-sm text-gray-600">
+              Elige el flujo que deseas usar para esta sesión.
+            </p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <button
+                onClick={() => handleModeSelection("one-shot")}
+                className={`rounded-lg border px-4 py-3 text-left text-sm transition-colors ${
+                  selectedMode === "one-shot"
+                    ? "border-[#165185] bg-[#165185] text-white"
+                    : "border-gray-200 bg-white text-gray-700 hover:border-[#165185]"
+                }`}
+              >
+                <span className="block font-medium">Evaluaciones One-Shot</span>
+                <span className="mt-1 block text-xs opacity-85">
+                  Formato clásico: una pregunta y una respuesta por fila.
+                </span>
+              </button>
+              <button
+                onClick={() => handleModeSelection("conversational")}
+                className={`rounded-lg border px-4 py-3 text-left text-sm transition-colors ${
+                  selectedMode === "conversational"
+                    ? "border-[#165185] bg-[#165185] text-white"
+                    : "border-gray-200 bg-white text-gray-700 hover:border-[#165185]"
+                }`}
+              >
+                <span className="block font-medium">Evaluaciones Conversacionales</span>
+                <span className="mt-1 block text-xs opacity-85">
+                  Varias interacciones por fila (turnos secuenciales).
+                </span>
+              </button>
+            </div>
+          </div>
           <AgentContextForm
             initialValue={reportContext}
             onSubmit={handleContextSubmit}
+            disabled={!selectedMode}
+            description={
+              selectedMode
+                ? undefined
+                : "Selecciona antes el tipo de evaluación para habilitar este paso."
+            }
+            submitLabel={
+              selectedMode ? "Continuar a carga de CSV" : "Selecciona tipo para continuar"
+            }
           />
         </main>
       </div>
@@ -861,7 +938,9 @@ export default function Home() {
                 onClick={() => {
                   sessionStorage.removeItem("accessKey");
                   sessionStorage.removeItem(REPORT_CONTEXT_STORAGE_KEY);
+                  sessionStorage.removeItem(EVALUATION_MODE_STORAGE_KEY);
                   setAccessKey("");
+                  setSelectedMode(null);
                   setReportContext(null);
                   setState("login");
                 }}
@@ -886,11 +965,16 @@ export default function Home() {
             <div className="text-center">
               <h2 className="text-xl font-medium">Sube tus archivos CSV</h2>
               <p className="text-sm text-gray-500 mt-1">
-                Cada archivo debe contener las columnas: question,
-                expectedResponse, actualResponse
+                {selectedMode === "conversational"
+                  ? "Cada fila debe usar columnas por turno: question1, expectedResponse1, actualResponse1, question2, expectedResponse2, actualResponse2..."
+                  : "Cada archivo debe contener las columnas: question, expectedResponse, actualResponse"}
               </p>
             </div>
-            <CsvUploader onUpload={handleUpload} disabled={false} />
+            <CsvUploader
+              mode={selectedMode ?? "one-shot"}
+              onUpload={handleUpload}
+              disabled={false}
+            />
           </div>
         )}
 
@@ -1065,6 +1149,7 @@ export default function Home() {
                     <div key={config.id} className="space-y-6">
                       <ScoreCharts results={results} />
                       <ResultsTable
+                        mode={activeDataset.mode}
                         rows={activeDataset.rows}
                         results={results}
                         modelLabel={config.model}
@@ -1100,7 +1185,7 @@ export default function Home() {
             <div className="text-center">
               <h2 className="text-xl font-medium">Evaluación completada</h2>
               <p className="text-sm text-gray-500 mt-1">
-                {activeDataset.rows.length} respuestas en {activeDataset.fileName}
+                {getEvaluationItemLabel(activeDataset.mode, activeDataset.rows.length)} en {activeDataset.fileName}
               </p>
             </div>
 
@@ -1289,6 +1374,7 @@ export default function Home() {
                         results={results}
                       />
                       <ResultsTable
+                        mode={activeDataset.mode}
                         rows={activeDataset.rows}
                         results={results}
                         modelLabel={config.model}

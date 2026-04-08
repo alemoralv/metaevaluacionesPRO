@@ -103,7 +103,11 @@ Se habilitan pestañas:
 
 ## Formato y reglas del CSV
 
-El CSV de entrada debe contener **exactamente** estas columnas:
+La app soporta dos formatos según el tipo de evaluación seleccionado:
+
+### Evaluaciones One-Shot
+
+El CSV debe contener **exactamente** estas columnas:
 
 | Columna | Descripción |
 |---|---|
@@ -124,6 +128,20 @@ Reglas aplicadas:
 - Si falta una columna requerida, se rechaza el archivo.
 - Si una fila viene sin contenido en cualquiera de las tres columnas, se descarta.
 - Si no quedan filas válidas tras el filtrado, se muestra error.
+
+### Evaluaciones Conversacionales
+
+El CSV debe incluir columnas por turno en formato numerado:
+
+`question1, expectedResponse1, actualResponse1, question2, expectedResponse2, actualResponse2, ...`
+
+Reglas aplicadas:
+
+- Se detectan los turnos por columnas `questionN`.
+- Para cada `questionN` debe existir también `expectedResponseN` y `actualResponseN`.
+- En cada fila, la conversación termina cuando `questionN` aparece vacío.
+- Si un turno tiene `questionN` pero falta `expectedResponseN` o `actualResponseN`, esa fila se considera inválida.
+- Cada fila válida se evalúa como conversación completa, puntuando turno a turno y agregando un resultado final por fila.
 
 ---
 

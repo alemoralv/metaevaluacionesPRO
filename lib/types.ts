@@ -1,7 +1,24 @@
+export type EvaluationMode = "one-shot" | "conversational";
+
+export interface ConversationTurn {
+  question: string;
+  expectedResponse: string;
+  actualResponse: string;
+}
+
 export interface EvaluationRow {
   question: string;
   expectedResponse: string;
   actualResponse: string;
+  mode?: EvaluationMode;
+  turnCount?: number;
+  conversationTurns?: ConversationTurn[];
+}
+
+export interface ConversationEvaluationRow extends EvaluationRow {
+  mode: "conversational";
+  turnCount: number;
+  conversationTurns: ConversationTurn[];
 }
 
 export interface EvaluationResult {
@@ -70,6 +87,7 @@ export interface AgentReportContext {
 export interface UploadedCsvDataset {
   id: string;
   fileName: string;
+  mode: EvaluationMode;
   rows: EvaluationRow[];
 }
 
@@ -91,6 +109,7 @@ export interface DatasetEvaluationState {
 export interface EvaluationDataset {
   id: string;
   fileName: string;
+  mode: EvaluationMode;
   rows: EvaluationRow[];
   useSharedContext: boolean;
   contextOverride: AgentReportContext | null;

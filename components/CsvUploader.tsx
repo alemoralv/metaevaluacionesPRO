@@ -2,9 +2,15 @@
 
 import { useCallback, useState, DragEvent, ChangeEvent } from "react";
 import Papa from "papaparse";
-import { EvaluationRow, UploadedCsvDataset } from "@/lib/types";
+import {
+  ConversationTurn,
+  EvaluationMode,
+  EvaluationRow,
+  UploadedCsvDataset,
+} from "@/lib/types";
 
 interface CsvUploaderProps {
+  mode: EvaluationMode;
   onUpload: (datasets: UploadedCsvDataset[]) => void;
   disabled: boolean;
 }
@@ -23,7 +29,25 @@ function generateDatasetId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
-export default function CsvUploader({ onUpload, disabled }: CsvUploaderProps) {
+function compactConversationSummary(turns: ConversationTurn[]): {
+  question: string;
+  expectedResponse: string;
+  actualResponse: string;
+} {
+  const summaryPrefix = `Conversación de ${turns.length} turno${turns.length === 1 ? "" : "s"}`;
+  const firstTurn = turns[0];
+  return {
+    question: `${summaryPrefix}: ${firstTurn.question}`,
+    expectedResponse: turns
+      .map((turn, index) => `Turno ${index + 1}: ${turn.expectedResponse}`)
+      .join(" | "),
+    actualResponse: turns
+      .map((turn, index) => `Turno ${index + 1}: ${turn.actualResponse}`)
+      .join(" | "),
+  };
+}
+
+export default function CsvUploader({ mode, onUpload, disabled }: CsvUploaderProps) {
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState("");
   const [fileNames, setFileNames] = useState<string[]>([]);
@@ -43,35 +67,113 @@ export default function CsvUploader({ onUpload, disabled }: CsvUploaderProps) {
           }
 
           const headers = results.meta.fields || [];
-          const missing = REQUIRED_COLUMNS.filter(
-            (col) => !headers.includes(col)
-          );
+          const rows: EvaluationRow[] = [];
+          const rowErrors: string[] = [];
 
-          if (missing.length > 0) {
-            resolve({
-              dataset: null,
-              error: `${file.name}: Columnas faltantes: ${missing.join(", ")}. El CSV necesita: ${REQUIRED_COLUMNS.join(", ")}`,
-            });
-            return;
-          }
+          if (mode === "one-shot") {
+            const missing = REQUIRED_COLUMNS.filter(
+              (col) => !headers.includes(col)
+            );
 
-          const rows: EvaluationRow[] = results.data
-            .filter(
-              (row) =>
+            if (missing.length > 0) {
+              resolve({
+                dataset: null,
+                error: `${file.name}: Columnas faltantes: ${missing.join(", ")}. El CSV necesita: ${REQUIRED_COLUMNS.join(", ")}`,
+              });
+              return;
+            }
+
+            results.data.forEach((row) => {
+              if (
                 row.question?.trim() &&
                 row.expectedResponse?.trim() &&
                 row.actualResponse?.trim()
-            )
-            .map((row) => ({
-              question: row.question.trim(),
-              expectedResponse: row.expectedResponse.trim(),
-              actualResponse: row.actualResponse.trim(),
-            }));
+              ) {
+                rows.push({
+                  question: row.question.trim(),
+                  expectedResponse: row.expectedResponse.trim(),
+                  actualResponse: row.actualResponse.trim(),
+                  mode: "one-shot",
+                });
+              }
+            });
+          } else {
+            const indexedQuestionColumns = headers
+              .map((column) => {
+                const match = /^question(\d+)$/.exec(column.trim());
+                return match ? Number(match[1]) : null;
+              })
+              .filter((value): value is number => value !== null)
+              .sort((a, b) => a - b);
+
+            if (indexedQuestionColumns.length === 0) {
+              resolve({
+                dataset: null,
+                error: `${file.name}: No se detectaron columnas conversacionales. Usa encabezados como question1, expectedResponse1, actualResponse1.`,
+              });
+              return;
+            }
+
+            const missingTriplets = indexedQuestionColumns
+              .filter(
+                (index) =>
+                  !headers.includes(`expectedResponse${index}`) ||
+                  !headers.includes(`actualResponse${index}`)
+              )
+              .map((index) => `question${index}/expectedResponse${index}/actualResponse${index}`);
+
+            if (missingTriplets.length > 0) {
+              resolve({
+                dataset: null,
+                error: `${file.name}: Faltan columnas para turnos conversacionales: ${missingTriplets.join(", ")}`,
+              });
+              return;
+            }
+
+            results.data.forEach((rawRow, rowIndex) => {
+              const turns: ConversationTurn[] = [];
+              for (const turnIndex of indexedQuestionColumns) {
+                const question = (rawRow[`question${turnIndex}`] ?? "").trim();
+                if (!question) break;
+
+                const expectedResponse = (rawRow[`expectedResponse${turnIndex}`] ?? "").trim();
+                const actualResponse = (rawRow[`actualResponse${turnIndex}`] ?? "").trim();
+
+                if (!expectedResponse || !actualResponse) {
+                  rowErrors.push(
+                    `Fila ${rowIndex + 2}: el turno ${turnIndex} tiene question${turnIndex} pero faltan expectedResponse${turnIndex} o actualResponse${turnIndex}.`
+                  );
+                  return;
+                }
+
+                turns.push({
+                  question,
+                  expectedResponse,
+                  actualResponse,
+                });
+              }
+
+              if (turns.length === 0) return;
+
+              const summary = compactConversationSummary(turns);
+              rows.push({
+                ...summary,
+                mode: "conversational",
+                turnCount: turns.length,
+                conversationTurns: turns,
+              });
+            });
+          }
 
           if (rows.length === 0) {
             resolve({
               dataset: null,
-              error: `${file.name}: El CSV no contiene filas válidas con datos en las 3 columnas requeridas`,
+              error:
+                rowErrors.length > 0
+                  ? `${file.name}: ${rowErrors.join(" ")}`
+                  : mode === "one-shot"
+                    ? `${file.name}: El CSV no contiene filas válidas con datos en las 3 columnas requeridas`
+                    : `${file.name}: El CSV no contiene conversaciones válidas.`,
             });
             return;
           }
@@ -80,9 +182,10 @@ export default function CsvUploader({ onUpload, disabled }: CsvUploaderProps) {
             dataset: {
               id: generateDatasetId(),
               fileName: file.name,
+              mode,
               rows,
             },
-            error: null,
+            error: rowErrors.length > 0 ? `${file.name}: ${rowErrors.join(" ")}` : null,
           });
         },
         error: (err) => {
@@ -93,7 +196,7 @@ export default function CsvUploader({ onUpload, disabled }: CsvUploaderProps) {
         },
       });
     });
-  }, []);
+  }, [mode]);
 
   const processFiles = useCallback(
     async (files: File[]) => {
@@ -199,7 +302,9 @@ export default function CsvUploader({ onUpload, disabled }: CsvUploaderProps) {
             </span>
           </p>
           <p className="text-xs text-gray-400">
-            Columnas requeridas: question, expectedResponse, actualResponse
+            {mode === "conversational"
+              ? "Columnas esperadas por turno: question1, expectedResponse1, actualResponse1, question2, ..."
+              : "Columnas requeridas: question, expectedResponse, actualResponse"}
           </p>
           {fileNames.length > 0 && (
             <p className="text-xs text-gray-500 mt-2">

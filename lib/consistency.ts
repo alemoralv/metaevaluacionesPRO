@@ -13,6 +13,12 @@ export function computeConsistency(
   allResults: Record<string, EvaluationResult[]>
 ): QuestionConsistency[] {
   const agentIds = Object.keys(allResults);
+  const rowLabel = (row: EvaluationRow): string => {
+    if (row.mode === "conversational" && row.turnCount && row.turnCount > 0) {
+      return `Conversación (${row.turnCount} turnos): ${row.question}`;
+    }
+    return row.question;
+  };
 
   return rows.map((row, i) => {
     const accuracies: number[] = [];
@@ -38,7 +44,7 @@ export function computeConsistency(
 
     return {
       questionIndex: i,
-      question: row.question,
+      question: rowLabel(row),
       accuracyStdDev: Math.round(populationStdDev(accuracies) * 100) / 100,
       completenessStdDev:
         Math.round(populationStdDev(completions) * 100) / 100,
