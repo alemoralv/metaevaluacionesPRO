@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { LLMConfig } from "@/lib/types";
+import { LLMConfig, LLMProvider } from "@/lib/types";
 
 interface LLMConfiguratorProps {
   onStart: (configs: LLMConfig[], metaEnabled: boolean) => void;
@@ -9,6 +9,7 @@ interface LLMConfiguratorProps {
   initialConfigs?: LLMConfig[];
   initialMetaEnabled?: boolean;
   startLabel?: string;
+  forceProvider?: LLMProvider;
 }
 
 function generateId(): string {
@@ -17,10 +18,15 @@ function generateId(): string {
 
 export const createDefaultConfig = (): LLMConfig => ({
   id: generateId(),
+  provider: "openai",
   model: "gpt-4o-mini",
   temperature: 0.2,
   topP: 1,
 });
+
+function getModelPlaceholder(provider: LLMProvider): string {
+  return provider === "openai" ? "gpt-4o-mini" : "gemini-2.0-flash";
+}
 
 export default function LLMConfigurator({
   onStart,
@@ -28,10 +34,16 @@ export default function LLMConfigurator({
   initialConfigs,
   initialMetaEnabled = false,
   startLabel,
+  forceProvider,
 }: LLMConfiguratorProps) {
+  const normalizeConfig = (config: LLMConfig): LLMConfig => ({
+    ...config,
+    provider: config.provider ?? "openai",
+  });
+
   const [configs, setConfigs] = useState<LLMConfig[]>(() => {
     if (initialConfigs && initialConfigs.length > 0) {
-      return initialConfigs.map((config) => ({ ...config }));
+      return initialConfigs.map((config) => normalizeConfig(config));
     }
     return [createDefaultConfig()];
   });
@@ -39,7 +51,7 @@ export default function LLMConfigurator({
 
   useEffect(() => {
     if (initialConfigs && initialConfigs.length > 0) {
-      setConfigs(initialConfigs.map((config) => ({ ...config })));
+      setConfigs(initialConfigs.map((config) => normalizeConfig(config)));
       return;
     }
     setConfigs([createDefaultConfig()]);
@@ -54,6 +66,25 @@ export default function LLMConfigurator({
       prev.map((c) => (c.id === id ? { ...c, ...patch } : c))
     );
   };
+
+  const updateProvider = (id: string, provider: LLMProvider) => {
+    setConfigs((prev) =>
+      prev.map((config) => {
+        if (config.id !== id) return config;
+        const nextModel = provider === "openai" ? "gpt-4o-mini" : "gemini-2.0-flash";
+        return {
+          ...config,
+          provider,
+          model: config.model.trim() ? config.model : nextModel,
+        };
+      })
+    );
+  };
+
+  useEffect(() => {
+    if (!forceProvider) return;
+    setConfigs((prev) => prev.map((config) => ({ ...config, provider: forceProvider })));
+  }, [forceProvider]);
 
   const addConfig = () => {
     setConfigs((prev) => [...prev, createDefaultConfig()]);
@@ -97,6 +128,21 @@ export default function LLMConfigurator({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">
+                  Proveedor
+                </label>
+                <select
+                  value={config.provider}
+                  disabled={Boolean(forceProvider)}
+                  onChange={(e) => updateProvider(config.id, e.target.value as LLMProvider)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500"
+                >
+                  <option value="openai">OpenAI</option>
+                  <option value="gemini">Gemini</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">
                   Modelo
                 </label>
                 <input
@@ -105,7 +151,7 @@ export default function LLMConfigurator({
                   onChange={(e) =>
                     updateConfig(config.id, { model: e.target.value })
                   }
-                  placeholder="gpt-4o-mini"
+                  placeholder={getModelPlaceholder(config.provider)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
                 />
               </div>
@@ -200,7 +246,12 @@ export default function LLMConfigurator({
             </div>
 
             <p className="text-xs text-gray-400">
-              {config.model} (T={config.temperature}, P={config.topP})
+              {config.provider === "openai" ? "OpenAI" : "Gemini"} - {config.model} (T={config.temperature}, P={config.topP})
+            </p>
+            <p className="text-xs text-gray-400">
+              {config.provider === "openai"
+                ? "OpenAI: se envían temperature, topP y maxTokens cuando el modelo lo permite."
+                : "Gemini: se envían temperature, topP y maxOutputTokens solo cuando aplique."}
             </p>
           </div>
         ))}

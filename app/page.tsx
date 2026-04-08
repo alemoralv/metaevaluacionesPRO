@@ -12,6 +12,7 @@ import MetaEvaluationPanel from "@/components/MetaEvaluationPanel";
 import AgentComparisonPanel from "@/components/AgentComparisonPanel";
 import html2canvas from "html2canvas";
 import {
+  ClientAuthSession,
   DatasetEvaluationState,
   EvaluationDataset,
   EvaluationMode,
@@ -56,7 +57,8 @@ const DIMS: { label: string; field: ScoreField }[] = [
 ];
 
 function llmLabel(config: LLMConfig): string {
-  return `${config.model} (T=${config.temperature})`;
+  const provider = config.provider === "openai" ? "OpenAI" : "Gemini";
+  return `${provider} · ${config.model} (T=${config.temperature})`;
 }
 
 function avg(vals: number[]): number {
@@ -74,6 +76,7 @@ function generateId(): string {
 function createDefaultLlmConfig(): LLMConfig {
   return {
     id: generateId(),
+    provider: "openai",
     model: "gpt-4o-mini",
     temperature: 0.2,
     topP: 1,
@@ -178,7 +181,7 @@ function buildPanoramaSummary(
 
 export default function Home() {
   const [state, setState] = useState<AppState>("login");
-  const [accessKey, setAccessKey] = useState("");
+  const [authSession, setAuthSession] = useState<ClientAuthSession | null>(null);
   const [selectedMode, setSelectedMode] = useState<EvaluationMode | null>(null);
   const [reportContext, setReportContext] = useState<AgentReportContext | null>(
     null
@@ -198,20 +201,15 @@ export default function Home() {
   const overviewChartsCaptureRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const saved = sessionStorage.getItem("accessKey");
     const savedContext = sessionStorage.getItem(REPORT_CONTEXT_STORAGE_KEY);
     const savedMode = sessionStorage.getItem(EVALUATION_MODE_STORAGE_KEY);
     const savedLlm = sessionStorage.getItem(SHARED_LLM_CONFIG_STORAGE_KEY);
     const savedMeta = sessionStorage.getItem(SHARED_META_ENABLED_STORAGE_KEY);
-    if (saved) {
-      setAccessKey(saved);
-      if (savedMode === "one-shot" || savedMode === "conversational") {
-        setSelectedMode(savedMode);
-      }
-      if (savedContext) {
-        setReportContext(JSON.parse(savedContext) as AgentReportContext);
-      }
-      setState(savedContext && (savedMode === "one-shot" || savedMode === "conversational") ? "upload" : "context");
+    if (savedMode === "one-shot" || savedMode === "conversational") {
+      setSelectedMode(savedMode);
+    }
+    if (savedContext) {
+      setReportContext(JSON.parse(savedContext) as AgentReportContext);
     }
     if (savedLlm) {
       try {
@@ -228,8 +226,8 @@ export default function Home() {
     }
   }, []);
 
-  const handleLogin = (key: string) => {
-    setAccessKey(key);
+  const handleLogin = (session: ClientAuthSession) => {
+    setAuthSession(session);
     setState("context");
   };
 
@@ -269,6 +267,24 @@ export default function Home() {
   };
 
   const activeDataset = datasets.find((dataset) => dataset.id === activeDatasetId) ?? null;
+
+  const buildAuthHeaders = useCallback((): Record<string, string> => {
+    if (!authSession) return {};
+
+    const headers: Record<string, string> = {
+      "x-auth-mode": authSession.mode,
+      "x-provider": authSession.provider,
+    };
+
+    if (authSession.mode === "user" && authSession.apiKey) {
+      headers["x-user-api-key"] = authSession.apiKey;
+    }
+    if (authSession.mode === "admin" && authSession.adminPassword) {
+      headers["x-admin-password"] = authSession.adminPassword;
+    }
+
+    return headers;
+  }, [authSession]);
 
   const setDatasetEvaluation = useCallback(
     (
@@ -344,12 +360,13 @@ export default function Home() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-access-key": accessKey,
+          ...buildAuthHeaders(),
         },
         body: JSON.stringify({
           mode,
           rows: batchRows,
           llmConfig: {
+            provider: config.provider,
             model: config.model,
             temperature: config.temperature,
             topP: config.topP,
@@ -359,8 +376,7 @@ export default function Home() {
       });
 
       if (response.status === 401) {
-        sessionStorage.removeItem("accessKey");
-        setAccessKey("");
+        setAuthSession(null);
         setState("login");
         return false;
       }
@@ -429,7 +445,7 @@ export default function Home() {
 
       return true;
     },
-    [accessKey, setDatasetEvaluation]
+    [buildAuthHeaders, setDatasetEvaluation]
   );
 
   const BATCH_SIZE = 10;
@@ -473,6 +489,27 @@ export default function Home() {
     meta: boolean
   ) => {
     if (!activeDataset) return;
+    if (!authSession) {
+      setError("Tu sesión expiró. Vuelve a ingresar tu API key.");
+      setState("login");
+      return;
+    }
+
+    if (
+      authSession.mode === "user" &&
+      configs.some((config) => config.provider !== authSession.provider)
+    ) {
+      const providerLabel = authSession.provider === "openai" ? "OpenAI" : "Gemini";
+      setError(
+        `Tu sesión está configurada para ${providerLabel}. Ajusta los evaluadores al mismo proveedor o vuelve a ingresar con la API key correcta.`
+      );
+      return;
+    }
+
+    if (authSession.mode === "admin" && configs.some((config) => config.provider !== "openai")) {
+      setError("El modo Admin solo permite evaluadores con proveedor OpenAI.");
+      return;
+    }
 
     if (activeDataset.useSharedLlmConfig) {
       const sharedClone = cloneConfigs(configs);
@@ -547,9 +584,16 @@ export default function Home() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-access-key": accessKey,
+            ...buildAuthHeaders(),
           },
-          body: JSON.stringify({ summary }),
+          body: JSON.stringify({
+            summary,
+            llmConfig: {
+              provider: configs[0]?.provider ?? authSession.provider,
+              model: configs[0]?.model,
+              temperature: 0.3,
+            },
+          }),
         });
 
         if (response.ok) {
@@ -723,14 +767,13 @@ export default function Home() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-access-key": accessKey,
+          ...buildAuthHeaders(),
         },
         body: JSON.stringify({ payload }),
       });
 
       if (response.status === 401) {
-        sessionStorage.removeItem("accessKey");
-        setAccessKey("");
+        setAuthSession(null);
         setState("login");
         return;
       }
@@ -829,10 +872,9 @@ export default function Home() {
             </div>
             <button
               onClick={() => {
-                sessionStorage.removeItem("accessKey");
                 sessionStorage.removeItem(REPORT_CONTEXT_STORAGE_KEY);
                 sessionStorage.removeItem(EVALUATION_MODE_STORAGE_KEY);
-                setAccessKey("");
+                setAuthSession(null);
                 setSelectedMode(null);
                 setReportContext(null);
                 setState("login");
@@ -936,10 +978,9 @@ export default function Home() {
               )}
               <button
                 onClick={() => {
-                  sessionStorage.removeItem("accessKey");
                   sessionStorage.removeItem(REPORT_CONTEXT_STORAGE_KEY);
                   sessionStorage.removeItem(EVALUATION_MODE_STORAGE_KEY);
-                  setAccessKey("");
+                  setAuthSession(null);
                   setSelectedMode(null);
                   setReportContext(null);
                   setState("login");
@@ -1068,6 +1109,7 @@ export default function Home() {
               }
               onStart={handleStartEvaluation}
               disabled={false}
+              forceProvider={authSession?.mode === "admin" ? "openai" : undefined}
               startLabel={`Evaluar ${activeDataset.fileName}`}
             />
           </div>

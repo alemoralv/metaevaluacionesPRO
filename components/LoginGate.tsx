@@ -2,43 +2,55 @@
 
 import { useState, FormEvent } from "react";
 import logoProfuturo from "@/profuturologo.png";
+import { ClientAuthSession, LLMProvider } from "@/lib/types";
 
 interface LoginGateProps {
-  onLogin: (key: string) => void;
+  onLogin: (session: ClientAuthSession) => void;
 }
 
 export default function LoginGate({ onLogin }: LoginGateProps) {
-  const [key, setKey] = useState("");
+  const [provider, setProvider] = useState<LLMProvider>("openai");
+  const [apiKey, setApiKey] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+  const [adminMode, setAdminMode] = useState(false);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!key.trim()) {
-      setError("Ingresa la clave de acceso");
+    if (adminMode) {
+      if (!adminPassword.trim()) {
+        setError("Ingresa la contraseña de Admin");
+        return;
+      }
+      if (adminPassword !== "Am16037361") {
+        setError("Contraseña de Admin incorrecta");
+        return;
+      }
+      setSubmitting(true);
+      setError("");
+      onLogin({
+        mode: "admin",
+        provider: "openai",
+        adminPassword: adminPassword.trim(),
+      });
+      setSubmitting(false);
       return;
     }
-    setLoading(true);
+
+    if (!apiKey.trim()) {
+      setError("Ingresa tu API key para continuar");
+      return;
+    }
+
+    setSubmitting(true);
     setError("");
-
-    const res = await fetch("/api/evaluate", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-access-key": key.trim(),
-      },
-      body: JSON.stringify({ rows: [] }),
+    onLogin({
+      mode: "user",
+      provider,
+      apiKey: apiKey.trim(),
     });
-
-    setLoading(false);
-
-    if (res.status === 401) {
-      setError("Clave incorrecta");
-      return;
-    }
-
-    sessionStorage.setItem("accessKey", key.trim());
-    onLogin(key.trim());
+    setSubmitting(false);
   };
 
   return (
@@ -77,24 +89,75 @@ export default function LoginGate({ onLogin }: LoginGateProps) {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <input
-              type="password"
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-              placeholder="Clave de acceso"
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent text-sm"
-              autoFocus
-            />
+          {!adminMode && (
+            <>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">
+                  Proveedor
+                </label>
+                <select
+                  value={provider}
+                  onChange={(e) => setProvider(e.target.value as LLMProvider)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent text-sm"
+                >
+                  <option value="openai">OpenAI</option>
+                  <option value="gemini">Gemini</option>
+                </select>
+              </div>
+
+              <div>
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder={`API key de ${provider === "openai" ? "OpenAI" : "Gemini"}`}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent text-sm"
+                  autoFocus
+                />
+              </div>
+              <p className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-md px-3 py-2">
+                Tu API key no se guarda en ningún lado. Solo se usa en memoria durante
+                esta sesión y se elimina al recargar o cerrar la pestaña.
+              </p>
+            </>
+          )}
+
+          {adminMode && (
+            <div>
+              <input
+                type="password"
+                value={adminPassword}
+                onChange={(e) => setAdminPassword(e.target.value)}
+                placeholder="Contraseña de Admin"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent text-sm"
+                autoFocus
+              />
+              <p className="text-xs text-gray-500 mt-2">
+                Modo Admin usa la API key en `.env` y solo habilita OpenAI.
+              </p>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="submit"
+              disabled={submitting}
+              className="w-full py-3 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {submitting ? "Validando..." : adminMode ? "Entrar como Admin" : "Ingresar"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAdminMode((prev) => !prev);
+                setError("");
+              }}
+              className="w-full py-3 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+            >
+              {adminMode ? "Volver" : "Admin"}
+            </button>
           </div>
           {error && <p className="text-red-500 text-sm">{error}</p>}
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-3 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? "Verificando..." : "Ingresar"}
-          </button>
         </form>
       </div>
     </div>

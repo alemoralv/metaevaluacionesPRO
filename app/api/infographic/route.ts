@@ -11,6 +11,7 @@ import {
   InfographicPayload,
 } from "@/lib/infographic";
 import { renderInfographicSvg } from "@/lib/infographicLocalRenderer";
+import { resolveAuthFromHeaders } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -225,9 +226,9 @@ function tryReadPayload(body: InfographicBody): InfographicPayload | null {
 }
 
 export async function POST(request: NextRequest) {
-  const accessKey = request.headers.get("x-access-key");
-  if (accessKey !== process.env.ACCESS_KEY) {
-    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  const authResult = resolveAuthFromHeaders(request.headers);
+  if (!authResult.ok) {
+    return authResult.response;
   }
 
   let body: InfographicBody;

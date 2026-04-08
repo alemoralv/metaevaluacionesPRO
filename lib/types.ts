@@ -1,4 +1,6 @@
 export type EvaluationMode = "one-shot" | "conversational";
+export type LLMProvider = "openai" | "gemini";
+export type AuthMode = "user" | "admin";
 
 export interface ConversationTurn {
   question: string;
@@ -49,10 +51,18 @@ export interface EnrichedRow {
 
 export interface LLMConfig {
   id: string;
+  provider: LLMProvider;
   model: string;
   temperature: number;
   topP: number;
   maxTokens?: number;
+}
+
+export interface ClientAuthSession {
+  mode: AuthMode;
+  provider: LLMProvider;
+  apiKey?: string;
+  adminPassword?: string;
 }
 
 export interface QuestionConsistency {
