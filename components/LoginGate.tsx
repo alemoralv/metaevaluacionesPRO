@@ -19,11 +19,12 @@ export default function LoginGate({ onLogin }: LoginGateProps) {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (adminMode) {
-      if (!adminPassword.trim()) {
+      const normalizedAdminPassword = adminPassword.trim();
+      if (!normalizedAdminPassword) {
         setError("Ingresa la contraseña de Admin");
         return;
       }
-      if (adminPassword !== "Am16037361") {
+      if (normalizedAdminPassword !== "Am16037361") {
         setError("Contraseña de Admin incorrecta");
         return;
       }
@@ -32,7 +33,7 @@ export default function LoginGate({ onLogin }: LoginGateProps) {
       onLogin({
         mode: "admin",
         provider: "openai",
-        adminPassword: adminPassword.trim(),
+        adminPassword: normalizedAdminPassword,
       });
       setSubmitting(false);
       return;

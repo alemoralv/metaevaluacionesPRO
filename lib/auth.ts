@@ -20,7 +20,8 @@ export function resolveAuthFromHeaders(
 
   if (mode === "admin") {
     const adminPassword = headers.get("x-admin-password");
-    if (!adminPassword || adminPassword !== ADMIN_PASSWORD) {
+    const normalizedAdminPassword = adminPassword?.trim();
+    if (!normalizedAdminPassword || normalizedAdminPassword !== ADMIN_PASSWORD) {
       return {
         ok: false,
         response: NextResponse.json({ error: "No autorizado" }, { status: 401 }),

@@ -382,10 +382,18 @@ export default function Home() {
       }
 
       if (!response.ok) {
-        const errData = await response.json();
+        let errMessage = `HTTP ${response.status}`;
+        try {
+          const errData = await response.json();
+          if (errData?.error) {
+            errMessage = String(errData.error);
+          }
+        } catch {
+          // Keep HTTP status fallback when backend doesn't return JSON.
+        }
         setDatasetEvaluation(datasetId, (evaluation) => ({
           ...evaluation,
-          error: `${evaluation.error ? `${evaluation.error}\n` : ""}${llmLabel(config)}: ${errData.error || "Error"}`,
+          error: `${evaluation.error ? `${evaluation.error}\n` : ""}${llmLabel(config)}: ${errMessage}`,
         }));
         return false;
       }
@@ -562,6 +570,22 @@ export default function Home() {
     settled.forEach(({ id, results }) => {
       if (results) finalResults[id] = results;
     });
+
+    const totalEvaluated = Object.values(finalResults).reduce(
+      (acc, list) => acc + list.length,
+      0
+    );
+    if (totalEvaluated === 0) {
+      setDatasetEvaluation(activeDataset.id, (evaluation) => ({
+        ...evaluation,
+        status: "idle",
+      }));
+      setState("configure");
+      setError(
+        "No se recibieron resultados de evaluación. Revisa la API key, el proveedor/modelo y vuelve a intentar."
+      );
+      return;
+    }
 
     setDatasetEvaluation(activeDataset.id, (evaluation) => ({
       ...evaluation,
