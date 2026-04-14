@@ -187,12 +187,14 @@ function normalizeGwBaseUrl(baseUrl: string, withV1: boolean): string {
 
 function getGwBaseCandidates(openAiBaseUrl?: string): { primary?: string; fallback?: string } {
   if (!openAiBaseUrl) return {};
-  const normalizedWithV1 = normalizeGwBaseUrl(openAiBaseUrl, true);
-  const normalizedWithoutV1 = normalizeGwBaseUrl(openAiBaseUrl, false);
-  if (!normalizedWithV1) return {};
+  const trimmed = trimTrailingSlashes(openAiBaseUrl.trim());
+  if (!trimmed) return {};
+  const hasV1 = /\/v1$/i.test(trimmed);
+  const withoutV1 = trimmed.replace(/\/v1$/i, "");
+  const withV1 = `${withoutV1}/v1`;
   return {
-    primary: normalizedWithV1,
-    fallback: normalizedWithoutV1 !== normalizedWithV1 ? normalizedWithoutV1 : undefined,
+    primary: hasV1 ? withV1 : withoutV1,
+    fallback: hasV1 ? withoutV1 : withV1,
   };
 }
 
@@ -288,10 +290,18 @@ async function requestWithOpenAi(
     return await requestOnce(firstBase);
   } catch (firstError) {
     const firstStatus = getErrorStatus(firstError);
+    if (isGwMode) {
+      console.error(
+        `[OpenAI GW] Primary request failed | baseURL=${firstBase} | status=${firstStatus ?? "N/A"} | ${firstError instanceof Error ? firstError.message : String(firstError)}`,
+      );
+    }
     if (isGwMode && firstStatus === 404 && gwFallbackBase) {
       try {
         return await requestOnce(gwFallbackBase);
       } catch (fallbackError) {
+        console.error(
+          `[OpenAI GW] Fallback request failed | baseURL=${gwFallbackBase} | status=${getErrorStatus(fallbackError) ?? "N/A"} | ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`,
+        );
         throw formatGwFailure(fallbackError, gwFallbackBase);
       }
     }
