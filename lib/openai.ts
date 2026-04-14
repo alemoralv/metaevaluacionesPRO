@@ -162,6 +162,75 @@ function createOpenAiClient(apiKey?: string, openAiBaseUrl?: string): OpenAI {
   return new OpenAI({ apiKey: resolved, baseURL: openAiBaseUrl });
 }
 
+function trimTrailingSlashes(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
+function normalizeGwBaseUrl(baseUrl: string, withV1: boolean): string {
+  const trimmed = trimTrailingSlashes(baseUrl.trim());
+  if (!trimmed) return trimmed;
+  const withoutV1 = trimmed.replace(/\/v1$/i, "");
+  return withV1 ? `${withoutV1}/v1` : withoutV1;
+}
+
+function getGwBaseCandidates(openAiBaseUrl?: string): { primary?: string; fallback?: string } {
+  if (!openAiBaseUrl) return {};
+  const normalizedWithV1 = normalizeGwBaseUrl(openAiBaseUrl, true);
+  const normalizedWithoutV1 = normalizeGwBaseUrl(openAiBaseUrl, false);
+  if (!normalizedWithV1) return {};
+  return {
+    primary: normalizedWithV1,
+    fallback: normalizedWithoutV1 !== normalizedWithV1 ? normalizedWithoutV1 : undefined,
+  };
+}
+
+function getErrorField(error: unknown, field: string): unknown {
+  if (typeof error !== "object" || error === null) return undefined;
+  return (error as Record<string, unknown>)[field];
+}
+
+function getErrorStatus(error: unknown): number | undefined {
+  const status = getErrorField(error, "status");
+  return typeof status === "number" ? status : undefined;
+}
+
+function getErrorStatusText(error: unknown): string | undefined {
+  const direct = getErrorField(error, "statusText");
+  if (typeof direct === "string" && direct.trim()) return direct;
+  const response = getErrorField(error, "response");
+  if (typeof response === "object" && response !== null) {
+    const value = (response as Record<string, unknown>).statusText;
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return undefined;
+}
+
+function getErrorRequestUrl(error: unknown): string | undefined {
+  const direct = getErrorField(error, "url");
+  if (typeof direct === "string" && direct.trim()) return direct;
+  const request = getErrorField(error, "request");
+  if (typeof request === "object" && request !== null) {
+    const value = (request as Record<string, unknown>).url;
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return undefined;
+}
+
+function formatGwFailure(error: unknown, attemptedBaseUrl: string): Error {
+  const originalMessage = error instanceof Error ? error.message : String(error);
+  const status = getErrorStatus(error);
+  const statusText = getErrorStatusText(error);
+  const requestUrl = getErrorRequestUrl(error);
+  const computedUrl = `${trimTrailingSlashes(attemptedBaseUrl)}/chat/completions`;
+  const parts = [
+    `OpenAI GW request failed: ${originalMessage}`,
+    `url=${requestUrl ?? computedUrl}`,
+  ];
+  if (status !== undefined) parts.push(`status=${status}`);
+  if (statusText) parts.push(`statusText=${statusText}`);
+  return new Error(parts.join(" | "));
+}
+
 function createGeminiClient(apiKey?: string): GoogleGenerativeAI {
   const resolved = apiKey || process.env.GEMINI_API_KEY;
   if (!resolved) {
@@ -192,10 +261,33 @@ async function requestWithOpenAi(
   if (support.topP && config?.topP !== undefined) params.top_p = config.topP;
   if (support.maxTokens && config?.maxTokens !== undefined) params.max_tokens = config.maxTokens;
 
-  const client = createOpenAiClient(config?.apiKey, config?.openAiBaseUrl);
-  const response = await client.chat.completions.create(params);
-  const content = response.choices[0].message.content || "{}";
-  return JSON.parse(content) as Record<string, unknown>;
+  const isGwMode = Boolean(config?.openAiBaseUrl);
+  const { primary: gwPrimaryBase, fallback: gwFallbackBase } = getGwBaseCandidates(config?.openAiBaseUrl);
+  const firstBase = isGwMode ? gwPrimaryBase : config?.openAiBaseUrl;
+
+  const requestOnce = async (baseURL?: string): Promise<Record<string, unknown>> => {
+    const client = createOpenAiClient(config?.apiKey, baseURL);
+    const response = await client.chat.completions.create(params);
+    const content = response.choices[0].message.content || "{}";
+    return JSON.parse(content) as Record<string, unknown>;
+  };
+
+  try {
+    return await requestOnce(firstBase);
+  } catch (firstError) {
+    const firstStatus = getErrorStatus(firstError);
+    if (isGwMode && firstStatus === 404 && gwFallbackBase) {
+      try {
+        return await requestOnce(gwFallbackBase);
+      } catch (fallbackError) {
+        throw formatGwFailure(fallbackError, gwFallbackBase);
+      }
+    }
+    if (isGwMode && gwPrimaryBase) {
+      throw formatGwFailure(firstError, gwPrimaryBase);
+    }
+    throw firstError;
+  }
 }
 
 async function requestWithGemini(
