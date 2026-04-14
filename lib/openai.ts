@@ -159,7 +159,19 @@ function createOpenAiClient(apiKey?: string, openAiBaseUrl?: string): OpenAI {
   if (!resolved) {
     throw new Error("No se encontro API key de OpenAI.");
   }
-  return new OpenAI({ apiKey: resolved, baseURL: openAiBaseUrl });
+  const isGwMode = Boolean(openAiBaseUrl);
+  return new OpenAI({
+    apiKey: resolved,
+    baseURL: openAiBaseUrl,
+    ...(isGwMode && resolved.startsWith("gw_")
+      ? {
+          defaultHeaders: {
+            "x-api-key": resolved,
+            "api-key": resolved,
+          },
+        }
+      : {}),
+  });
 }
 
 function trimTrailingSlashes(value: string): string {
