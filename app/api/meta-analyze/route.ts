@@ -53,6 +53,7 @@ export async function POST(request: NextRequest) {
     ...(config ?? {}),
     provider: authResult.auth.provider,
     apiKey: authResult.auth.apiKey,
+    openAiBaseUrl: authResult.auth.gwBaseUrl,
   };
 
   try {

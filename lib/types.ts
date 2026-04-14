@@ -63,6 +63,7 @@ export interface ClientAuthSession {
   provider: LLMProvider;
   apiKey?: string;
   adminPassword?: string;
+  gwBaseUrl?: string;
 }
 
 export interface QuestionConsistency {

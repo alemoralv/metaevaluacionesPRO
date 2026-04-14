@@ -8,8 +8,12 @@ interface LoginGateProps {
   onLogin: (session: ClientAuthSession) => void;
 }
 
+type LoginProviderOption = LLMProvider | "openai_gw";
+const OPENAI_GW_BASE_URL =
+  "https://ca-sandbox-gateway-llm-eastus.proudtree-e258edc9.eastus.azurecontainerapps.io";
+
 export default function LoginGate({ onLogin }: LoginGateProps) {
-  const [provider, setProvider] = useState<LLMProvider>("openai");
+  const [provider, setProvider] = useState<LoginProviderOption>("openai");
   const [apiKey, setApiKey] = useState("");
   const [adminPassword, setAdminPassword] = useState("");
   const [adminMode, setAdminMode] = useState(false);
@@ -48,8 +52,9 @@ export default function LoginGate({ onLogin }: LoginGateProps) {
     setError("");
     onLogin({
       mode: "user",
-      provider,
+      provider: provider === "openai_gw" ? "openai" : provider,
       apiKey: apiKey.trim(),
+      gwBaseUrl: provider === "openai_gw" ? OPENAI_GW_BASE_URL : undefined,
     });
     setSubmitting(false);
   };
@@ -98,10 +103,11 @@ export default function LoginGate({ onLogin }: LoginGateProps) {
                 </label>
                 <select
                   value={provider}
-                  onChange={(e) => setProvider(e.target.value as LLMProvider)}
+                  onChange={(e) => setProvider(e.target.value as LoginProviderOption)}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent text-sm"
                 >
                   <option value="openai">OpenAI</option>
+                  <option value="openai_gw">OpenAI GW</option>
                   <option value="gemini">Gemini</option>
                 </select>
               </div>
@@ -111,7 +117,13 @@ export default function LoginGate({ onLogin }: LoginGateProps) {
                   type="password"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
-                  placeholder={`API key de ${provider === "openai" ? "OpenAI" : "Gemini"}`}
+                  placeholder={`API key de ${
+                    provider === "gemini"
+                      ? "Gemini"
+                      : provider === "openai_gw"
+                        ? "OpenAI GW"
+                        : "OpenAI"
+                  }`}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent text-sm"
                   autoFocus
                 />

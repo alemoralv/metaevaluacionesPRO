@@ -102,6 +102,7 @@ function normalizeScore(value: unknown): number {
 export interface EvalRowConfig {
   provider?: LLMProvider;
   apiKey?: string;
+  openAiBaseUrl?: string;
   model?: string;
   temperature?: number;
   topP?: number;
@@ -153,12 +154,12 @@ function getModelParamSupport(provider: LLMProvider, model: string): ModelParamS
   return { temperature: true, topP: true, maxTokens: true };
 }
 
-function createOpenAiClient(apiKey?: string): OpenAI {
+function createOpenAiClient(apiKey?: string, openAiBaseUrl?: string): OpenAI {
   const resolved = apiKey || process.env.OPENAI_API_KEY;
   if (!resolved) {
     throw new Error("No se encontro API key de OpenAI.");
   }
-  return new OpenAI({ apiKey: resolved });
+  return new OpenAI({ apiKey: resolved, baseURL: openAiBaseUrl });
 }
 
 function createGeminiClient(apiKey?: string): GoogleGenerativeAI {
@@ -191,7 +192,7 @@ async function requestWithOpenAi(
   if (support.topP && config?.topP !== undefined) params.top_p = config.topP;
   if (support.maxTokens && config?.maxTokens !== undefined) params.max_tokens = config.maxTokens;
 
-  const client = createOpenAiClient(config?.apiKey);
+  const client = createOpenAiClient(config?.apiKey, config?.openAiBaseUrl);
   const response = await client.chat.completions.create(params);
   const content = response.choices[0].message.content || "{}";
   return JSON.parse(content) as Record<string, unknown>;

@@ -278,6 +278,9 @@ export default function Home() {
 
     if (authSession.mode === "user" && authSession.apiKey) {
       headers["x-user-api-key"] = authSession.apiKey;
+      if (authSession.gwBaseUrl) {
+        headers["x-gw-base-url"] = authSession.gwBaseUrl;
+      }
     }
     if (authSession.mode === "admin" && authSession.adminPassword) {
       headers["x-admin-password"] = authSession.adminPassword;

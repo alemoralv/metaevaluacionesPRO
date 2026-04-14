@@ -7,6 +7,7 @@ export interface ServerAuthContext {
   mode: AuthMode;
   provider: LLMProvider;
   apiKey: string;
+  gwBaseUrl?: string;
 }
 
 function isProvider(value: string | null): value is LLMProvider {
@@ -83,6 +84,7 @@ export function resolveAuthFromHeaders(
       mode: "user",
       provider,
       apiKey: apiKey.trim(),
+      gwBaseUrl: headers.get("x-gw-base-url")?.trim() || undefined,
     },
   };
 }
