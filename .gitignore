@@ -37,3 +37,6 @@ next-env.d.ts
 
 # generated artifacts
 sample.tex
+
+# evaluation registry (local data, not for version control)
+/registro_evals/

@@ -21,6 +21,7 @@ import {
   QuestionConsistency,
   AgentReportContext,
   UploadedCsvDataset,
+  EvaluationRegistryEntry,
 } from "@/lib/types";
 import {
   generateSingleEvaluatorPdf,
@@ -30,6 +31,8 @@ import {
 import { computeConsistency } from "@/lib/consistency";
 import { downloadTexFile } from "@/lib/texGenerator";
 import { buildInfographicPayload } from "@/lib/infographic";
+import { buildRegistryEntry } from "@/lib/registryBuilder";
+import { buildEmailSubject, buildEmailBody } from "@/lib/emailTemplate";
 
 type AppState =
   | "login"
@@ -598,6 +601,24 @@ export default function Home() {
     }));
     setState("results");
 
+    // Fire-and-forget: save evaluation summary to registro_evals
+    const resolvedCtxForRegistry = resolveReportContext(activeDataset);
+    if (resolvedCtxForRegistry) {
+      const registryEntry: EvaluationRegistryEntry = buildRegistryEntry({
+        datasetFileName: activeDataset.fileName,
+        evaluationMode: activeDataset.mode,
+        questionCount: activeDataset.rows.length,
+        reportContext: resolvedCtxForRegistry,
+        configs,
+        allResults: finalResults,
+      });
+      fetch("/api/registry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(registryEntry),
+      }).catch((err) => console.error("[registry] Error al guardar evaluación:", err));
+    }
+
     if (meta && Object.keys(finalResults).length > 1) {
       const consistencyData = computeConsistency(activeDataset.rows, finalResults);
       setDatasetEvaluation(activeDataset.id, (evaluation) => ({
@@ -863,6 +884,21 @@ export default function Home() {
     } finally {
       setInfographicGenerating(false);
     }
+  };
+
+  const handleComposeEmail = () => {
+    if (!activeDataset) return;
+    const resolvedContext = resolveReportContext(activeDataset);
+    if (!resolvedContext) return;
+    const subject = buildEmailSubject(resolvedContext, activeDataset.fileName);
+    const body = buildEmailBody(
+      resolvedContext,
+      activeDataset.evaluation.llmConfigs,
+      activeDataset.evaluation.allResults,
+      activeDataset.fileName
+    );
+    const mailto = `mailto:victor.munguia@profuturo.com.mx?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.open(mailto, "_blank");
   };
 
   const handleReset = () => {
@@ -1343,6 +1379,16 @@ export default function Home() {
                   </svg>
                 )}
                 Descargar infografia
+              </button>
+              <button
+                onClick={handleComposeEmail}
+                disabled={pdfGenerating || infographicGenerating}
+                className="px-4 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                Enviar por correo
               </button>
             </div>
 

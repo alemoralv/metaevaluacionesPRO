@@ -129,3 +129,27 @@ export interface EvaluationDataset {
   metaEnabledOverride: boolean | null;
   evaluation: DatasetEvaluationState;
 }
+
+export interface EvaluatorAverages {
+  configId: string;
+  provider: LLMProvider;
+  model: string;
+  temperature: number;
+  avgAccuracy: number;
+  avgCompleteness: number;
+  avgRelevance: number;
+  avgCoherence: number;
+  avgClarity: number;
+  avgUsefulness: number;
+  avgOverallScore: number;
+}
+
+export interface EvaluationRegistryEntry {
+  id: string;
+  timestamp: string;
+  datasetFileName: string;
+  evaluationMode: EvaluationMode;
+  questionCount: number;
+  reportContext: AgentReportContext;
+  evaluators: EvaluatorAverages[];
+}
