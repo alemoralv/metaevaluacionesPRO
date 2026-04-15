@@ -159,13 +159,16 @@ function createOpenAiClient(apiKey?: string, openAiBaseUrl?: string): OpenAI {
   if (!resolved) {
     throw new Error("No se encontro API key de OpenAI.");
   }
-  const isGwMode = Boolean(openAiBaseUrl);
+
+  const isGwMode = Boolean(openAiBaseUrl) && resolved.startsWith("gw_");
+
   return new OpenAI({
     apiKey: resolved,
     baseURL: openAiBaseUrl,
-    ...(isGwMode && resolved.startsWith("gw_")
+    ...(isGwMode
       ? {
           defaultHeaders: {
+            "X-Gateway-API-Key": resolved,
             "x-api-key": resolved,
             "api-key": resolved,
           },
